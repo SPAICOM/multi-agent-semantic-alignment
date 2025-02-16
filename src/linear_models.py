@@ -10,11 +10,12 @@ else:
     from src.utils import complex_compressed_tensor, decompress_complex_tensor, prewhiten, sigma_given_snr, awgn, a_inv_times_b
 
 
-class FederatedLinearOptimizerSAE():
-    """The linear optimizer for the Semantic Auto Encoder
-       in multi agent system case.
+class FederatedLinearOptimizer():
+    """The linear optimizer for a multi agent scenario.
     
     Args:
+        n_agents : int
+            The number of agents need for the simulation.
         input_dim : int
             The input dimension.
         output_dim : int
@@ -23,8 +24,6 @@ class FederatedLinearOptimizerSAE():
             The Complex Gaussian Matrix simulating the communication channel.
         snr : float
             The snr in dB of the communication channel. Set to None if unaware.
-        snr_type : str
-            The typology of snr, possible values 'transmitted' or 'received'. Default 'transmitted'.
         cost : float
             The transmition cost. Default 1.0.
         rho : int
@@ -32,6 +31,8 @@ class FederatedLinearOptimizerSAE():
 
     Attributes:
         self.<args_name>
+        self.dtype : torch.dtype
+            The dtype of the data.
         self.antennas_transmitter : int
             The number of antennas transmitting the signal.
         self.antennas_receiver : int
@@ -46,12 +47,11 @@ class FederatedLinearOptimizerSAE():
             The Dual variable for ADMM.
     """
     def __init__(self,
-                 n_agents:int,
+                 n_agents: int,
                  input_dim: int,
                  output_dim: int,
                  channel_matrix: list[torch.Tensor],
                  snr: float,
-                 snr_type: str = "transmitted",
                  cost: float = 1.0,
                  rho: float = 1e2,
                  device: str = "cpu"):
@@ -62,17 +62,12 @@ class FederatedLinearOptimizerSAE():
         self.output_dim: int = output_dim
         self.channel_matrix: list = [t.to(device) for t in channel_matrix]
         self.snr: float = snr
-        self.snr_type: str = snr_type
         self.cost: float = cost
         self.rho: float = rho
         self.device: str = device
         self.dtype = channel_matrix[0].dtype
         self.antennas_receiver, self.antennas_transmitter = self.channel_matrix[0].shape
-        
-        
-        # Check values
-        assert self.snr_type in ["transmitted", "received"], f"The passed snr typology {self.snr_type} is not supported."        
-
+                
         # Variables
         self.F :torch.Tensor = torch.randn(size=(self.antennas_transmitter, (self.input_dim + 1) // 2))
         self.F_k = {k:self.F for k in range(self.n_agents)}
@@ -85,12 +80,14 @@ class FederatedLinearOptimizerSAE():
         return None
     
     def __G_step(self,
-                 idx: int, # the user index
+                 idx: int,
                  input: torch.Tensor,
                  output: torch.Tensor) -> None:
         """The G step that minimize the Lagrangian.
 
         Args:
+            idx: int
+                The user index.
             input : torch.Tensor
                 The input tensor.
             output : torch.Tensor
@@ -108,13 +105,7 @@ class FederatedLinearOptimizerSAE():
         # Get sigma
         sigma = 0
         if self.snr:
-            if self.snr_type == "transmitted":
-                # sigma = sigma_given_snr(self.snr, self.F @ input)
-                sigma = sigma_given_snr(self.snr, torch.ones(1)/math.sqrt(self.antennas_transmitter))
-            elif self.snr_type == "received":
-                sigma = sigma_given_snr(self.snr, A)
-            else:
-                raise Exception("Wrong snr typology passed.")
+            sigma = sigma_given_snr(self.snr, torch.ones(1)/math.sqrt(self.antennas_transmitter))
         
         self.G_k[idx] = (output @ A.H @ torch.linalg.inv(A @ A.H + n * sigma * torch.view_as_complex(torch.stack((torch.eye(A.shape[0]), torch.eye(A.shape[0])), dim=-1)).to(self.device))).to(self.device)
         return None
@@ -127,6 +118,8 @@ class FederatedLinearOptimizerSAE():
         """The F step that minimize the Lagrangian.
 
         Args:
+            idx: int
+                The user index.
             input : torch.Tensor
                 The input tensor.
             output : torch.Tensor
@@ -155,7 +148,7 @@ class FederatedLinearOptimizerSAE():
         stacked_F = torch.stack(list(self.F_k.values()),dim=0)
         self.F = stacked_F.mean(dim=0)
         
-        assert self.F_k[0].shape == self.F.shape , "The F aggregation step has wrong dimensions of output;" 
+        assert self.F_k[0].shape == self.F.shape , "The F aggregation step has wrong dimensions of output." 
         return None   
 
 
@@ -200,8 +193,8 @@ class FederatedLinearOptimizerSAE():
         """Fitting the F and G to the passed data.
 
         Args:
-            n_agents: integer
-                    system agents.
+            n_agents : int
+                The total number of agents.
             input : torch.Tensor
                 The input tensor.
             output : torch.Tensor
@@ -297,13 +290,7 @@ class FederatedLinearOptimizerSAE():
 
             # Add the additive white gaussian noise
             if self.snr:
-                if self.snr_type == "transmitted": #HFX!
-                    # sigma = sigma_given_snr(snr=self.snr, signal= self.F @ input)
-                    sigma = sigma_given_snr(snr=self.snr, signal=torch.ones(1)/math.sqrt(self.antennas_transmitter))
-                elif self.snr_type == "received":
-                    sigma = sigma_given_snr(snr=self.snr, signal= z)
-                else:
-                    raise Exception("Wrong snr typology passed.")
+                sigma = sigma_given_snr(snr=self.snr, signal=torch.ones(1)/math.sqrt(self.antennas_transmitter))
                 
                 w = awgn(sigma=sigma, size=z.shape, device=self.device)
                 z += w
@@ -358,34 +345,30 @@ def main() -> None:
     # Variables definition
     cost: int = 1
     snr: float = 20
-    snr_type: str = "received"
     iterations: int = 10
     input_dim: int = 384
     output_dim: int = 768
     antennas_transmitter: int = 4
     antennas_receiver: int = 4
-    n_agent:int = 3
-    #channel_matrix: torch.Tensor = complex_gaussian_matrix(mean=0, std=1, size=(antennas_receiver, antennas_transmitter))
-    list_channel_matrix: list[torch.Tensor] = [complex_gaussian_matrix(mean=0, std=1, 
-                                                                size=(antennas_receiver, antennas_transmitter),)
-                                                                for _ in range(n_agent)]
+    n_agent: int = 3
+    list_channel_matrix: list[torch.Tensor] = [complex_gaussian_matrix(mean=0, std=1, size=(antennas_receiver, antennas_transmitter),) for _ in range(n_agent)]
     
-    input =   torch.randn(100, input_dim) #spazio latente TX
-    output = [torch.randn(100, output_dim) for _ in range(n_agent)] #spazi latente RXs
+    # Latent Spaces for TX and RX
+    input =   torch.randn(100, input_dim)
+    output = [torch.randn(100, output_dim) for _ in range(n_agent)]
     
     print("Test for Federated Linear Opt..", end='\t')
-    system= FederatedLinearOptimizerSAE(n_agents=n_agent,
-                                        input_dim=input_dim,
-                                        output_dim=output_dim,
-                                        channel_matrix=list_channel_matrix,
-                                        snr=snr,
-                                        snr_type=snr_type,
-                                        cost=cost,
-                                        device="cpu")
+    system = FederatedLinearOptimizer(n_agents=n_agent,
+                                      input_dim=input_dim,
+                                      output_dim=output_dim,
+                                      channel_matrix=list_channel_matrix,
+                                      snr=snr,
+                                      cost=cost,
+                                      device="cpu")
     system.fit(n_agent, input, output, iterations=iterations)
     
     #for agent in range(n_agent):
-    #    system.transform(input,agent)
+    #    system.transform(input, agent)
     print(system.eval(input, output))
     print("[Passed]")
     

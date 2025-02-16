@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from pytorch_lightning import seed_everything
 
 from src.utils import complex_gaussian_matrix
-from src.linear_models import FederatedLinearOptimizerSAE
+from src.linear_models import FederatedLinearOptimizer
 from src.datamodules import DataModule
 
 def main():
@@ -59,13 +59,6 @@ def main():
                         help="The snr of the communication channel in dB. Set to None if unaware. Default None.",
                         type=float,
                         default=None)
-    
-    parser.add_argument('-t',
-                        '--snr_type',
-                        help="The typology of the snr. Default 'transmitted'.",
-                        type=str,
-                        default="transmitted",
-                        choices=["transmitted", "received"])
     
     parser.add_argument('--transmitter',
                         help="The number of antennas for the transmitter.",
@@ -137,7 +130,6 @@ def main():
                              output_dim=list_datamodule[0].output_size,
                              channel_matrix=list_channel_matrix,
                              snr=args.snr,
-                             snr_type=args.snr_type,
                              cost=args.cost,
                              rho=args.rho)
 
@@ -145,9 +137,6 @@ def main():
     losses, traces = opt.fit(n_agents= len(args.decoder),
                              datamodule_list=list_datamodule,
                              iterations=args.iterations)
-    
-    #input=datamodule.train_data.z,
-    #output=datamodule.train_data.z_decoder
     
     # Eval the linear optimizer
     print("loss:",
