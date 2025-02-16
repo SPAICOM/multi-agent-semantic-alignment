@@ -1,0 +1,13 @@
+[project]
+name = "multi-agent-semantic-alignment"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "lightning>=2.5.0.post0",
+    "polars>=1.22.0",
+    "scipy>=1.15.1",
+    "seaborn>=0.13.2",
+    "torch>=2.6.0",
+]
