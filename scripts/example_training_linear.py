@@ -2,6 +2,7 @@
 This python module handles the training of the linear optimizer for SAE in Federated scenario.
 """
 # Add root to the path
+from tqdm import tqdm
 import sys
 import torch
 from pathlib import Path
