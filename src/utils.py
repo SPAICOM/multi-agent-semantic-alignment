@@ -33,7 +33,7 @@ import math
 def complex_compressed_tensor(x: torch.Tensor,
                               device: str = "cpu") -> torch.Tensor:
     """The function compress the feature dimension of the tensor by converting
-    half as real part and the other half as imaginary part.
+       half as real part and the other half as imaginary part.
 
     Args:
         x : torch.Tensor
@@ -46,11 +46,9 @@ def complex_compressed_tensor(x: torch.Tensor,
             The output tensor in complex format.
     """
     n, d = x.shape
-    
     if d % 2 != 0:
         x = torch.cat((x, torch.zeros((n, 1), dtype=x.dtype, device=x.device)), dim=1)
         d += 1   # Split the tensor into real and imaginary parts
-        
     real_part = x[:, :d//2]
     imaginary_part = x[:, d//2:]
 

@@ -18,62 +18,19 @@ from pytorch_lightning import LightningDataModule
 # =====================================================
 
 class CustomDataset(Dataset):
-    """A custom implementation of a Pytorch Dataset.
-
-    Args:
-        encoder_path : Path
-            The path to the encoder.
-        decider_path : Path
-            The path to the decoder.
-
-    Attributes:
-        The self.<arg_name> version of the arguments documented above.
-        self.z : torch.Tensor
-            The absolute representation of the Dataset encoder side.
-        self.labels : torch.Tensor
-            The labels of the Dataset.
-        self.z_decoder : torch.Tensor
-            The absolute representation of the Dataset decoder side.
-        self.input_size : int
-            The size of the input of the network.
-        self.output_size : int
-            The size of the output of the network.
-    """
+    
     def __init__(self,
-                 encoder_path: Path,
-                 decoder_path: Path):
-        self.encoder_path: Path = encoder_path
-        self.decoder_path: Path = decoder_path
-        
+                 path: Path):
+        self.path: Path = path
         # =================================================
-        #                 Encoder Stuff
+        #               Latent Absolute Data
         # =================================================
-        encoder_blob = torch.load(self.encoder_path, weights_only=True)
-
+        encoder_blob = torch.load(self.path, weights_only=True)
         # Retrieve the absolute representation from the encoder
-        self.z = encoder_blob['absolute']
-
-        # Retrieve the labels
-        self.labels = encoder_blob['labels']
-
+        self.latent_space = encoder_blob['absolute']
+        self.labels = encoder_blob['labels'] 
         del encoder_blob
-
-        # =================================================
-        #                 Decoder Stuff
-        # =================================================
-        decoder_blob = torch.load(self.decoder_path, weights_only=True)
-
-        # Retrieve the absolute representation from the decoder
-        self.z_decoder = decoder_blob['absolute']
-
-        del decoder_blob
-        
-        # =================================================
-        #         Get the input and the output size
-        # =================================================
-        # When the input is only the absolute representation
-        self.input_size = self.z.shape[-1]
-        self.output_size = self.z_decoder.shape[-1]
+        self.latent_space_size = self.latent_space.shape
 
 
     def __len__(self) -> int:
@@ -83,7 +40,7 @@ class CustomDataset(Dataset):
             int
                 Length of the Dataset.
         """
-        return len(self.z)
+        return len(self.latent_space)
 
 
     def __getitem__(self,
@@ -99,12 +56,9 @@ class CustomDataset(Dataset):
                 The inputs and target as a tuple of tensors.
         """
         # Get the absolute representation of element idx
-        input = self.z[idx]
+        input = self.latent_space[idx]
 
-        # Get the absolute representation of element idx
-        output = self.z_decoder[idx]
-
-        return input, output
+        return input
 
 
 class DatasetClassifier(Dataset):
