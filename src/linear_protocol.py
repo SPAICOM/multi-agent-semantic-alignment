@@ -1,111 +1,55 @@
-import math
-import torch
-import numpy as np
-from tqdm.auto import tqdm
-from scipy.linalg import solve_sylvester
-import sys
-import os
-# Aggiungi il percorso della directory radice 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.abspath(os.path.join(current_dir, '..'))  # Risale di un livello
-sys.path.insert(0, root_dir)
-from src.datamodules import CustomDataset
-from src.utils import complex_compressed_tensor, decompress_complex_tensor, prewhiten, sigma_given_snr, awgn, a_inv_times_b
-from pathlib import Path
-from torch.utils.data import Dataset, DataLoader
-from pytorch_lightning import LightningDataModule
-from gdown import download
-from zipfile import ZipFile
-from dotenv import dotenv_values
+from common_import import *
 from src.utils import complex_gaussian_matrix
-from src.users import Agents
-from src.base_station import Base_Station
 
-class Linear_Protocol(Base_Station, Agents):
-    def __init__(self, 
-                 dataset:str, 
-                 model_name:list, 
-                 iterations:int = 10, 
-                 snr :float =20, 
-                 rho:int = 1e2,
-                 device:str="cpu",
-                 cost:float = 1.0,
-                 **args):
-        self.snr=snr
-        self.cost= cost
-        self.iter = iterations
-        self.rho=rho 
-        # Initialize Base_Station and agents 
-        Base_Station.__init__(self, **args)
-        Agents.__init__(self, 
-                        dataset=dataset, 
-                        model_name=model_name,
-                        **args)
-        self.n = self.train_bs.latent_space.shape[0]
-        self.channel_matrix = complex_gaussian_matrix(mean=0, std=1, size=(self.antennas_receiver, self.antennas_transmitter))
-        
-    def linear_optimizer(self,iterations:int):
-        
-        
-        self.X, self.L, self.mean_X = prewhiten(self.X, device=self.device)
-        #self.X = a_inv_times_b(self.L, self.X - self.mean_X)
-        self.F = torch.view_as_complex(torch.stack((torch.randn(self.antennas_transmitter, (self.train_bs.latent_space_size[-1] + 1) // 2), torch.randn(self.antennas_transmitter, (self.train_bs.latent_space_size[-1] + 1) // 2)), dim=-1)).to(self.device)
-        
-        with torch.no_grad():
-                
-            for i in tqdm(range(iterations)):
-                #################################
-                #          G_k Step             #
-                #################################
-                HFX = self.AP_message_broadcast(channel_matrix = self.channel_matrix)
-                #print(f"HFX at iteration {i} is: {HFX}")
-                sigma = sigma_given_snr(self.snr, torch.ones(1)/math.sqrt(self.antennas_transmitter))
+def main(iterations=10,
+         snr=20,
+         rho=1,
+         cost = 1.0,
+         device= "cpu"):
+    
+    user_languages = ["vit_small_patch32_224", "vit_small_patch16_224"]
+    user = {idx : Agent(dataset="cifar10", language_name=user_languages[idx], device=device) for idx in range(len(user_languages))}
+    bs = Base_Station(dataset="cifar10", model_name="vit_base_patch16_224")
+    channel_matrix = complex_gaussian_matrix(mean=0, std=1, size=(bs.antennas_transmitter, bs.antennas_transmitter)) 
+    #pre-whit. signal 
+    bs.X, bs.L, bs.mean_X = prewhiten(bs.X, device="cpu")
+    _, n = bs.X.shape
+    with torch.no_grad():
+            
+        for i in tqdm(range(iterations), "Computing ADMM scaled optimisation"):
+            for k in range(len(user_languages)):
+                #----------G STEP----------
+                HFX = bs.AP_message_broadcast(channel_matrix = channel_matrix)
+                sigma = sigma_given_snr(snr, torch.ones(1)/math.sqrt(bs.antennas_transmitter))
                 #G_k = Y(HFX)((HFX)(HFX)+nKΣ)^-1
-                self.G_k = {idx: (self.Y[idx] @ HFX.H @ torch.linalg.inv(HFX @ HFX.H + self.n  * sigma * torch.view_as_complex(torch.stack((torch.eye(HFX.shape[0]), torch.eye(HFX.shape[0])), dim=-1)).to(self.device))).to(self.device)
-                            for idx in range(self.num_users)}
-                #Dimensions check 
-                assert self.G_k[0].shape == ((self.train_users[0].latent_space.shape[-1] + 1) // 2, self.antennas_receiver), f"Expected G_k shape has dimension issues"
+                user[k].G_k = (user[0].Y @ HFX.H @ torch.linalg.inv(HFX @ HFX.H + n * sigma * torch.view_as_complex(torch.stack((torch.eye(HFX.shape[0]), torch.eye(HFX.shape[0])), dim=-1)).to(device))).to(device)
+                assert user[k].G_k.shape == ((user[k].train_user.latent_space.shape[-1] + 1) // 2, user[k].antennas_receiver), f"Expected G_k shape has dimension issues"
+            
+                #----------F_k STEP----------
+            rho_n = rho * n
+            for k in range(len(user_languages)):
+                bs.bs_buffer = user[k].user_message_broadcast(channel_matrix = channel_matrix) #a list that contain for each idx a list of A and (GH)^H(Y)
+                A = bs.bs_buffer[0]
+                B = rho_n * torch.linalg.inv(bs.X @ bs.X.H)
+                C = (rho_n * (bs.Z - bs.U)) + (bs.bs_buffer[1] @ bs.X.H) @ (B/(rho_n)) #quest'ultimo termine va controllato 
+                bs.F_k[k] = torch.tensor(solve_sylvester(A.cpu().numpy(), B.cpu().numpy(), C.cpu().numpy()), device=device)
                 
-                #################################
-                #    Fk Step & Aggregation      #
-                #################################
-                self.bs_buffer:list = self.user_message_broadcast(channel_matrix = self.channel_matrix) #a list that contain for each idx a list of A and (GH)^H(Y)
-                rho_n = self.rho*self.n
-                for user in range(self.num_users):
-                    A = self.bs_buffer[user][0]
-                    B = rho_n * torch.linalg.inv(self.X @ self.X.H)
-                    C = (rho_n * (self.Z - self.U)) + (self.bs_buffer[user][1] @ self.X.H) @ (B/(rho_n)) #quest'ultimo termine va controllato 
-                    self.F_k[user] = torch.tensor(solve_sylvester(A.cpu().numpy(), B.cpu().numpy(), C.cpu().numpy()), device=self.device)
-                    print(np.linalg.norm(self.F_k[user]))
-                    #residual = A.numpy().dot(self.F.numpy()) + self.F.numpy().dot(B.numpy()) - C.numpy()
-                    #print(np.linalg.norm(residual))
-                    
-                self._F_aggregation()
+            bs._F_aggregation()
+            
+              #----------Dual STEP----------
+            C = bs.F + bs.U
+            tr = torch.trace(C @ C.H).real
+            
+            if tr <= cost:
+                bs.Z = C
+            else:
+                lmb = torch.sqrt(tr / cost).item() -1
+                bs.Z = C / (1 + lmb)
                 
-                #################################
-                #     Dual variables update     #
-                #################################
-                C = self.F + self.U
-                tr = torch.trace(C @ C.H).real
-                
-                if tr <= self.cost:
-                    self.Z = C
-                else:
-                    lmb = torch.sqrt(tr / self.cost).item() -1
-                    self.Z = C / (1 + lmb)
-                    
-                self.U = self.U + self.F - self.Z
-                #self.residuals = torch.linalg.matrix_norm(self.F - self.Z)
-                #print(f"Residuals at iter {i} is: {self.residuals}")
-        return None
-    
-    
-    
+            bs.U = bs.U + bs.F - bs.Z
+            admm_residuals = torch.linalg.matrix_norm(bs.F - bs.Z)
+            print(f"Residuals at iter {i} is: {admm_residuals}")
 
-if __name__ == "__main__":
-    lp = Linear_Protocol(dataset="cifar10", 
-                        model_name=["vit_small_patch16_224", "vit_small_patch32_224"])
-    lp.linear_optimizer(iterations=10)
-    
-    
-    
+if __name__=="__main__":
+    main()       
+        

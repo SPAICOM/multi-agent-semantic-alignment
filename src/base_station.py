@@ -1,22 +1,4 @@
-import math
-import torch
-import numpy as np
-from tqdm.auto import tqdm
-from scipy.linalg import solve_sylvester
-import sys
-import os
-# Aggiungi il percorso della directory radice 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.abspath(os.path.join(current_dir, '..'))  # Risale di un livello
-sys.path.insert(0, root_dir)
-from src.datamodules import CustomDataset
-from src.utils import complex_compressed_tensor, decompress_complex_tensor, prewhiten, sigma_given_snr, awgn, a_inv_times_b
-from pathlib import Path
-from torch.utils.data import Dataset, DataLoader
-from pytorch_lightning import LightningDataModule
-from gdown import download
-from zipfile import ZipFile
-from dotenv import dotenv_values
+from common_import import *
 
 
 class Base_Station(LightningDataModule):
@@ -24,11 +6,11 @@ class Base_Station(LightningDataModule):
        actions and the message that AP exchange with users.
     """
     def __init__(self, 
+                 num_users: int = 2, #momentaneamente assegnato cosi
                  dataset:str = "cifar10",
                  model_name:str = "vit_base_patch16_224",
                  batch_size:int =128,
                  antennas_transmitter:int= 192,
-                 num_users:int = 1, #temporary as that
                  device:str = "cpu"
                  ):
         self.device = device
@@ -42,9 +24,6 @@ class Base_Station(LightningDataModule):
         # Variables needed in the protocol variable exchange
         self.F = torch.view_as_complex(torch.stack((torch.randn(self.antennas_transmitter, (self.train_bs.latent_space_size[-1] + 1) // 2), torch.randn(self.antennas_transmitter, (self.train_bs.latent_space_size[-1] + 1) // 2)), dim=-1)).to(self.device)
         self.F_k = {k:None for k in range(num_users)}
-        #self.H = torch.view_as_complex(
-                 #torch.stack((torch.randn(self.antennas_transmitter, self.antennas_transmitter), 
-                             # torch.randn(self.antennas_transmitter, self.antennas_transmitter)), dim=-1)).to(self.device)
         self.Z = torch.zeros(self.antennas_transmitter,(self.train_bs.latent_space_size[-1] + 1) // 2).to(self.device)
         self.U = torch.zeros(self.antennas_transmitter,(self.train_bs.latent_space_size[-1] + 1) // 2).to(self.device) 
         
@@ -86,16 +65,14 @@ class Base_Station(LightningDataModule):
         #print(f"The AP latent space has dimension {self.train_data.latent_space_size}")
         return None
     
-    def AP_message_broadcast(self, channel_matrix, prewithening=False):
+    def AP_message_broadcast(self, channel_matrix):
         """ Broadcasts the message [HF^(t)X] to all users in the network.
         
         Args: None
         Return: message(Torch.tensor)--> the result of (HFX)^H
         """
-        self.H = channel_matrix
-        if prewithening:
-           self.X = prewhiten(self.X)
-        message = (self.H @ self.F @ self.X)
+        H = channel_matrix
+        message = (H @ self.F @ self.X)
         return message
     
     def _F_aggregation(self):
@@ -108,6 +85,16 @@ class Base_Station(LightningDataModule):
         return None
 
 if __name__ == "__main__":
-   bs = Base_Station(dataset="cifar10", model_name="vit_small_patch16_224")
-   bs.AP_message_broadcast() 
-   bs._F_aggregation() 
+   bs = Base_Station(dataset="cifar10")
+   H = torch.view_as_complex(
+    torch.stack(
+        (
+            torch.randn(bs.antennas_transmitter, bs.antennas_transmitter),
+            torch.randn(bs.antennas_transmitter, bs.antennas_transmitter)
+        ),
+        dim=-1
+    )
+)
+   
+   m=bs.AP_message_broadcast(channel_matrix=H) 
+   #bs._F_aggregation() 

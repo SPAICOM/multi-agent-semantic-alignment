@@ -1,8 +1,8 @@
 """In this python module we define class that handles the dataset:
-    - CustomDataset: a custom Pytorch Dataset for encoding from an absolute representation to a relative one.
-    - DatasetClassifier: a custom Pytorch Dataset for classifing images.
-    - DataModule: a Pytorch Lightning Data Module for the Relative Encoder.
-    - DataModuleClassifier: a Pytorch Lightning Data Module for classifing the images.
+- CustomDataset: a custom Pytorch Dataset for encoding from an absolute representation to a relative one.
+- DatasetClassifier: a custom Pytorch Dataset for classifing images.
+- DataModule: a Pytorch Lightning Data Module for the Relative Encoder.
+- DataModuleClassifier: a Pytorch Lightning Data Module for classifing the images.
 """
 
 import torch
@@ -17,11 +17,39 @@ from pytorch_lightning import LightningDataModule
 #
 # =====================================================
 
+
 class CustomDataset(Dataset):
     
     def __init__(self,
                  path: Path):
         self.path: Path = path
+    """A custom implementation of a Pytorch Dataset.
+
+    Args:
+        encoder_path : Path
+            The path to the encoder.
+        decider_path : Path
+            The path to the decoder.
+
+    Attributes:
+        The self.<arg_name> version of the arguments documented above.
+        self.z : torch.Tensor
+            The absolute representation of the Dataset encoder side.
+        self.labels : torch.Tensor
+            The labels of the Dataset.
+        self.z_decoder : torch.Tensor
+            The absolute representation of the Dataset decoder side.
+        self.input_size : int
+            The size of the input of the network.
+        self.output_size : int
+            The size of the output of the network.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+    ):
+        self.path : Path = path
         # =================================================
         #               Latent Absolute Data
         # =================================================
@@ -31,7 +59,8 @@ class CustomDataset(Dataset):
         self.labels = encoder_blob['labels'] 
         del encoder_blob
         self.latent_space_size = self.latent_space.shape
-
+        
+        return None
 
     def __len__(self) -> int:
         """Returns the length of the Dataset.
@@ -42,9 +71,10 @@ class CustomDataset(Dataset):
         """
         return len(self.latent_space)
 
-
-    def __getitem__(self,
-                    idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(
+        self,
+        idx: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns in a torch.Tensor format the input and the target.
 
         Args:
@@ -79,10 +109,13 @@ class DatasetClassifier(Dataset):
         self.num_classes : int
             The size of the number of classes.
     """
-    def __init__(self,
-                 path: Path):
+
+    def __init__(
+        self,
+        path: Path,
+    ):
         self.path: Path = path
-                
+
         # =================================================
         #                 Get the Data
         # =================================================
@@ -90,7 +123,7 @@ class DatasetClassifier(Dataset):
 
         # Retrieve the absolute representation from the decoder
         self.input = decoder_blob['absolute']
-        
+
         # Retrieve the labels
         self.labels = decoder_blob['labels']
 
@@ -102,7 +135,6 @@ class DatasetClassifier(Dataset):
         self.input_size = self.input.shape[-1]
         self.num_classes = self.labels.unique().shape[-1]
 
-
     def __len__(self) -> int:
         """Returns the length of the Dataset.
 
@@ -112,9 +144,10 @@ class DatasetClassifier(Dataset):
         """
         return len(self.input)
 
-
-    def __getitem__(self,
-                    idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(
+        self,
+        idx: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns in a torch.Tensor format the input and the target.
 
         Args:
@@ -130,7 +163,7 @@ class DatasetClassifier(Dataset):
 
         # Get the label of the element at idx
         l_i = self.labels[idx]
-        
+
         return input_i, l_i
 
 
@@ -139,7 +172,8 @@ class DatasetClassifier(Dataset):
 #                DATAMODULES DEFINITION
 #
 # =====================================================
-    
+
+
 class DataModule(LightningDataModule):
     """A custom Lightning Data Module to handle a Pytorch Dataset.
 
@@ -159,12 +193,15 @@ class DataModule(LightningDataModule):
     Attributes:
         The self.<arg_name> version of the arguments documented above.
     """
-    def __init__(self,
-                 dataset: str,
-                 encoder: str,
-                 decoder: str,
-                 batch_size: int = 128,
-                 num_workers: int = 0) -> None:
+
+    def __init__(
+        self,
+        dataset: str,
+        encoder: str,
+        decoder: str,
+        batch_size: int = 128,
+        num_workers: int = 0,
+    ) -> None:
         super().__init__()
 
         self.dataset: str = dataset
@@ -172,7 +209,6 @@ class DataModule(LightningDataModule):
         self.decoder: str = decoder
         self.batch_size: int = batch_size
         self.num_workers: int = num_workers
-
 
     def prepare_data(self) -> None:
         """This function prepares the dataset (Download and Unzip).
@@ -199,7 +235,7 @@ class DataModule(LightningDataModule):
 
             # Download the zip file
             download(id=ID, output=str(ZIP_PATH))
-            
+
         # Check if the directory exists
         if not DIR_PATH.is_dir():
             # Unzip the zip file
@@ -207,10 +243,11 @@ class DataModule(LightningDataModule):
                 zip_ref.extractall(ZIP_PATH.parent)
 
         return None
-    
 
-    def setup(self,
-              stage: str = None) -> None:
+    def setup(
+        self,
+        stage: str = None,
+    ) -> None:
         """This function setups a Dataset for our data.
 
         Args:
@@ -223,21 +260,32 @@ class DataModule(LightningDataModule):
         CURRENT = Path('.')
         GENERAL_PATH: Path = CURRENT / 'data/latents' / self.dataset
 
-        self.train_data = CustomDataset(encoder_path=GENERAL_PATH / 'train' / f'{self.encoder}.pt',
-                                        decoder_path=GENERAL_PATH / 'train' / f'{self.decoder}.pt')
-        self.test_data = CustomDataset(encoder_path=GENERAL_PATH / 'test' / f'{self.encoder}.pt',
-                                       decoder_path=GENERAL_PATH / 'test' / f'{self.decoder}.pt')
-        self.val_data = CustomDataset(encoder_path=GENERAL_PATH / 'val' / f'{self.encoder}.pt',
-                                      decoder_path=GENERAL_PATH / 'val' / f'{self.decoder}.pt')
+        self.train_data = CustomDataset(
+            encoder_path=GENERAL_PATH / 'train' / f'{self.encoder}.pt',
+            decoder_path=GENERAL_PATH / 'train' / f'{self.decoder}.pt',
+        )
+        self.test_data = CustomDataset(
+            encoder_path=GENERAL_PATH / 'test' / f'{self.encoder}.pt',
+            decoder_path=GENERAL_PATH / 'test' / f'{self.decoder}.pt',
+        )
+        self.val_data = CustomDataset(
+            encoder_path=GENERAL_PATH / 'val' / f'{self.encoder}.pt',
+            decoder_path=GENERAL_PATH / 'val' / f'{self.decoder}.pt',
+        )
 
-        assert self.train_data.input_size == self.test_data.input_size and self.train_data.input_size == self.val_data.input_size, "Input size must match between train, test and val data."
-        assert self.train_data.output_size == self.test_data.output_size and self.train_data.output_size == self.val_data.output_size, "Output size must match between train, test and val data."
+        assert (
+            self.train_data.input_size == self.test_data.input_size
+            and self.train_data.input_size == self.val_data.input_size
+        ), 'Input size must match between train, test and val data.'
+        assert (
+            self.train_data.output_size == self.test_data.output_size
+            and self.train_data.output_size == self.val_data.output_size
+        ), 'Output size must match between train, test and val data.'
 
         self.input_size = self.train_data.input_size
         self.output_size = self.train_data.output_size
 
         return None
-
 
     def train_dataloader(self) -> DataLoader:
         """The function returns the train DataLoader.
@@ -246,8 +294,12 @@ class DataModule(LightningDataModule):
             DataLoader
                 The train DataLoader.
         """
-        return DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
-
+        return DataLoader(
+            self.train_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
 
     def test_dataloader(self) -> DataLoader:
         """The function returns the test DataLoader.
@@ -256,8 +308,12 @@ class DataModule(LightningDataModule):
             DataLoader
                 The test DataLoader.
         """
-        return DataLoader(self.test_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
+        return DataLoader(
+            self.test_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
     def val_dataloader(self) -> DataLoader:
         """The function returns the validation DataLoader.
@@ -266,8 +322,12 @@ class DataModule(LightningDataModule):
             DataLoader
                 The validation DataLoader.
         """
-        return DataLoader(self.val_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
+        return DataLoader(
+            self.val_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
     def predict_dataloader(self) -> DataLoader:
         """The function returns the predict DataLoader.
@@ -276,8 +336,12 @@ class DataModule(LightningDataModule):
             DataLoader
                 The predict DataLoader.
         """
-        return DataLoader(self.test_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
+        return DataLoader(
+            self.test_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
 
 class DataModuleClassifier(LightningDataModule):
@@ -297,18 +361,20 @@ class DataModuleClassifier(LightningDataModule):
     Attributes:
         The self.<arg_name> version of the arguments documented above.
     """
-    def __init__(self,
-                 dataset: str,
-                 decoder: str,
-                 batch_size: int = 128,
-                 num_workers: int = 0) -> None:
+
+    def __init__(
+        self,
+        dataset: str,
+        decoder: str,
+        batch_size: int = 128,
+        num_workers: int = 0,
+    ) -> None:
         super().__init__()
 
         self.dataset: str = dataset
         self.decoder: str = decoder
         self.batch_size: int = batch_size
         self.num_workers: int = num_workers
-
 
     def prepare_data(self) -> None:
         """This function prepare the dataset (Download and Unzip).
@@ -335,7 +401,7 @@ class DataModuleClassifier(LightningDataModule):
 
             # Download the zip file
             download(id=ID, output=str(ZIP_PATH))
-            
+
         # Check if the directory exists
         if not DIR_PATH.is_dir():
             # Unzip the zip file
@@ -343,10 +409,8 @@ class DataModuleClassifier(LightningDataModule):
                 zip_ref.extractall(ZIP_PATH.parent)
 
         return None
-    
 
-    def setup(self,
-              stage: str = None) -> None:
+    def setup(self, stage: str = None) -> None:
         """This function setups a DatasetRelativeDecoder for our data.
 
         Args:
@@ -359,17 +423,28 @@ class DataModuleClassifier(LightningDataModule):
         CURRENT = Path('.')
         GENERAL_PATH: Path = CURRENT / 'data/latents' / self.dataset
 
-        self.train_data = DatasetClassifier(path=GENERAL_PATH / 'train' / f'{self.decoder}.pt')
-        self.test_data = DatasetClassifier(path=GENERAL_PATH / 'test' / f'{self.decoder}.pt')
-        self.val_data = DatasetClassifier(path=GENERAL_PATH / 'val' / f'{self.decoder}.pt')
+        self.train_data = DatasetClassifier(
+            path=GENERAL_PATH / 'train' / f'{self.decoder}.pt'
+        )
+        self.test_data = DatasetClassifier(
+            path=GENERAL_PATH / 'test' / f'{self.decoder}.pt'
+        )
+        self.val_data = DatasetClassifier(
+            path=GENERAL_PATH / 'val' / f'{self.decoder}.pt'
+        )
 
-        assert self.train_data.input_size == self.test_data.input_size and self.train_data.input_size == self.val_data.input_size, "Input size must match between train, test and val data."
-        assert self.train_data.num_classes == self.test_data.num_classes and self.train_data.num_classes == self.val_data.num_classes, "The number of classes must match between train, test and val data."
+        assert (
+            self.train_data.input_size == self.test_data.input_size
+            and self.train_data.input_size == self.val_data.input_size
+        ), 'Input size must match between train, test and val data.'
+        assert (
+            self.train_data.num_classes == self.test_data.num_classes
+            and self.train_data.num_classes == self.val_data.num_classes
+        ), 'The number of classes must match between train, test and val data.'
 
         self.input_size = self.train_data.input_size
         self.num_classes = self.train_data.num_classes
         return None
-
 
     def train_dataloader(self) -> DataLoader:
         """The function returns the train DataLoader.
@@ -378,8 +453,12 @@ class DataModuleClassifier(LightningDataModule):
             DataLoader
                 The train DataLoader.
         """
-        return DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
-
+        return DataLoader(
+            self.train_data,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
 
     def test_dataloader(self) -> DataLoader:
         """The function returns the test DataLoader.
@@ -388,8 +467,12 @@ class DataModuleClassifier(LightningDataModule):
             DataLoader
                 The test DataLoader.
         """
-        return DataLoader(self.test_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
+        return DataLoader(
+            self.test_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
     def val_dataloader(self) -> DataLoader:
         """The function returns the validation DataLoader.
@@ -398,8 +481,12 @@ class DataModuleClassifier(LightningDataModule):
             DataLoader
                 The validation DataLoader.
         """
-        return DataLoader(self.val_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
+        return DataLoader(
+            self.val_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
     def predict_dataloader(self) -> DataLoader:
         """The function returns the predict DataLoader.
@@ -408,25 +495,26 @@ class DataModuleClassifier(LightningDataModule):
             DataLoader
                 The predict DataLoader.
         """
-        return DataLoader(self.test_data, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
+        return DataLoader(
+            self.test_data,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
 
 def main() -> None:
-    """The main script loop in which we perform some sanity tests.
-    """
-    print("Start performing sanity tests...")
+    """The main script loop in which we perform some sanity tests."""
+    print('Start performing sanity tests...')
     print()
-    
+
     # Setting inputs
     dataset = 'cifar10'
     encoder = 'vit_small_patch16_224'
     decoder = 'vit_base_patch16_224'
-    
-    print("Running first test...", end='\t')
-    data = DataModule(dataset=dataset,
-                      encoder=encoder,
-                      decoder=decoder)
+
+    print('Running first test...', end='\t')
+    data = DataModule(dataset=dataset, encoder=encoder, decoder=decoder)
 
     data.prepare_data()
     data.setup()
@@ -436,10 +524,9 @@ def main() -> None:
 
     print('[Passed]')
 
-    print("Running second test...", end='\t')
-    data = DataModuleClassifier(dataset=dataset,
-                                decoder=decoder)
-    
+    print('Running second test...', end='\t')
+    data = DataModuleClassifier(dataset=dataset, decoder=decoder)
+
     data.prepare_data()
     data.setup()
     next(iter(data.train_dataloader()))
@@ -451,5 +538,5 @@ def main() -> None:
     return None
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
