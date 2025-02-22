@@ -4,11 +4,11 @@ This python module handles the training of the linear optimizer for SAE in Feder
 
 # Add root to the path
 import sys
-import torch
 from pathlib import Path
 
 sys.path.append(str(Path(sys.path[0]).parent))
 
+import torch
 import polars as pl
 import seaborn as sns
 import matplotlib.pyplot as plt

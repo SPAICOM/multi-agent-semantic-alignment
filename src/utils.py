@@ -35,29 +35,37 @@ def complex_compressed_tensor(
     x: torch.Tensor,
     device: str = 'cpu',
 ) -> torch.Tensor:
-    """The function compress the feature dimension of the tensor by converting
-    half as real part and the other half as imaginary part.
+    """Converts a real-valued tensor into a complex-valued tensor by compressing
+    the feature dimension. The first half of the original feature dimension
+    is used as the real part, and the second half is used as the imaginary part.
+
+    If the feature dimension (d) is odd, an extra row of zeros is appended
+    to make it even before splitting.
 
     Args:
         x : torch.Tensor
-            The input tensor to compress.
-        device : str
-            The device of the tensor. Default cpu.
+            Input tensor of shape (d, n), where d is the feature dimension
+            and n is the number of samples.
+        device : str, optional
+            The device to which the output tensor should be moved. Default is "cpu".
 
-    Returns:
-        torch.Tensor
-            The output tensor in complex format.
+        Returns:
+            torch.Tensor
+                A complex-valued tensor of shape (d/2, n) where each entry is a
+                complex number constructed from the original real-valued tensor.
     """
-    n, d = x.shape
+    d, n = x.shape
 
     if d % 2 != 0:
         x = torch.cat(
-            (x, torch.zeros((n, 1), dtype=x.dtype, device=x.device)), dim=1
+            (x, torch.zeros((1, n), dtype=x.dtype, device=x.device)), dim=0
         )
-        d += 1  # Split the tensor into real and imaginary parts
 
-    real_part = x[:, : d // 2]
-    imaginary_part = x[:, d // 2 :]
+        # Ensuring even dimension for splitting
+        d += 1
+
+    real_part = x[: d // 2, :]
+    imaginary_part = x[d // 2 :, :]
 
     # Combine real and imaginary parts into a complex tensor
     x = torch.stack((real_part, imaginary_part), dim=-1)
@@ -69,24 +77,27 @@ def decompress_complex_tensor(
     x: torch.Tensor,
     device: str = 'cpu',
 ) -> torch.Tensor:
-    """The function decompress the complex compressed tensor in the original real domain.
+    """Decompresses a complex-valued tensor back into its original real-valued form.
+    The function separates the real and imaginary parts and concatenates them
+    along the feature dimension.
 
     Args:
         x : torch.Tensor
-            The input compressed tensor.
-        device : str
-            The device of the tensor. Default cpu.
+            Input complex-valued tensor of shape (d/2, n), where each entry
+            is a complex number.
+        device : str, optional
+            The device to which the output tensor should be moved. Default is "cpu".
 
     Returns:
         torch.Tensor
-            The output decompressed tensor.
+            A real-valued tensor of shape (d, n), reconstructing the original input format.
     """
     # Split the complex tensor into real and imaginary parts
     real_part = x.real
     imaginary_part = x.imag
 
     # Concatenate the real and imaginary parts along the feature dimension
-    x = torch.cat((real_part, imaginary_part), dim=1)
+    x = torch.cat((real_part, imaginary_part), dim=0)
 
     return x.to(device)
 
