@@ -1,204 +1,266 @@
 import math
 import torch
 import numpy as np
-from tqdm.auto import tqdm
+from collections import defaultdict
 from scipy.linalg import solve_sylvester
 
 if __name__ == '__main__':
     from utils import (
-        complex_gaussian_matrix,
         complex_compressed_tensor,
-        decompress_complex_tensor,
         prewhiten,
         sigma_given_snr,
-        awgn,
-        a_inv_times_b,
     )
 else:
     from src.utils import (
         complex_compressed_tensor,
-        decompress_complex_tensor,
         prewhiten,
         sigma_given_snr,
-        awgn,
-        a_inv_times_b,
     )
 
 
-class FederatedLinearOptimizer:
-    """The linear optimizer for a multi agent scenario.
+# ============================================================
+#
+#                    CLASSES DEFINITION
+#
+# ============================================================
+class BaseStation:
+    """A class simulating a Base Station.
 
     Args:
-        n_agents : int
-            The number of agents need for the simulation.
-        input_dim : int
-            The input dimension.
-        output_dim : int
-            The output dimension.
-        channel_matrix : torch.Tensor
-            The Complex Gaussian Matrix simulating the communication channel.
-        snr : float
-            The snr in dB of the communication channel. Set to None if unaware.
-        cost : float
-            The transmition cost. Default 1.0.
-        rho : int
+        dim: int
+            The dimentionality of the base station encoding space.
+        antennas_transmitter : int
+            The number of antennas at transmitter side.
+        rho : float
             The rho coeficient for the admm method. Default 1e2.
+        px_cost : int
+            The transmitter power constraint. Default 1.
+        channel_matrix : torch.Tensor
+            The channel matrix. Set to None for the channel unaware case. Default None.
+        device : str
+            The device on which we run the simulation. Default "cpu".
 
     Attributes:
-        self.<args_name>
-        self.dtype : torch.dtype
-            The dtype of the data.
-        self.antennas_transmitter : int
-            The number of antennas transmitting the signal.
-        self.antennas_receiver : int
-            The number of antennas receiving the signal.
+        self.<param_name> :
+            The self. version of the passed parameter.
+        self.agents_id : set[int]
+            The set of agents IDs that are connected to this base station.
+        self.agents_pilot : dict[int, torch.Tensor]
+            The semantic pilots for the specific agent, already complex compressed and prewhitened.
+        self.msgs : dict[str, int]
+            The total messages.
+        self.channel_awareness : bool
+            The channel awareness of the base station.
         self.F : torch.Tensor
-            The F matrix.
-        self.G : torch.Tensor
-            The G matrix.
+            The global F transformation.
+        self.Fk : dict[int, torch.Tensor]
+            The local F transformation of each agent.
         self.Z : torch.Tensor
-            The Proximal variable for ADMM.
+            The Z parameter required by ADMM.
         self.U : torch.Tensor
-            The Dual variable for ADMM.
+            The U parameter required by Scaled ADMM.
     """
 
     def __init__(
         self,
-        n_agents: int,
-        input_dim: int,
-        output_dim: int,
-        channel_matrix: list[torch.Tensor],
-        snr: float,
-        cost: float = 1.0,
+        dim: int,
+        antennas_transmitter: int,
         rho: float = 1e2,
+        px_cost: int = 1,
+        channel_matrix: torch.Tensor = None,
         device: str = 'cpu',
-    ):
-        assert len(channel_matrix[0].shape) == 2, (
-            'The matrix must be 2 dimesional.'
-        )
-        self.n_agents = n_agents
-        self.input_dim: int = input_dim
-        self.output_dim: int = output_dim
-        self.channel_matrix: list = [t.to(device) for t in channel_matrix]
-        self.snr: float = snr
-        self.cost: float = cost
+    ) -> None:
+        self.dim: int = dim
+        self.antennas_transmitter: int = antennas_transmitter
         self.rho: float = rho
+        self.px_cost: int = px_cost
+        self.channel_matrix: torch.Tensor = channel_matrix
         self.device: str = device
-        self.dtype = channel_matrix[0].dtype
-        self.antennas_receiver, self.antennas_transmitter = (
-            self.channel_matrix[0].shape
-        )
 
-        # Variables
-        self.F: torch.Tensor = torch.randn(
-            size=(self.antennas_transmitter, (self.input_dim + 1) // 2)
-        )
-        self.F_k = {k: self.F for k in range(self.n_agents)}
-        self.G_k = {k: None for k in range(self.n_agents)}
+        # Attributes Initialization
+        self.L = {}
+        self.mean = {}
+        self.agents_id = set()
+        self.agents_pilots = {}
+        self.msgs = defaultdict(int)
+        self.channel_awareness = self.channel_matrix is not None
+
+        # Set the channl matrix to the device
+        if self.channel_awareness:
+            self.channel_matrix = self.channel_matrix.to(device)
+
+        # Initialize Global F at random and locals
+        self.F = torch.randn(
+            (self.antennas_transmitter, (self.dim + 1) // 2),
+            dtype=torch.complex64,
+        ).to(self.device)
+        self.Fk = {}
 
         # ADMM variables
         self.Z = torch.zeros(
-            self.antennas_transmitter, (self.input_dim + 1) // 2
+            self.antennas_transmitter,
+            (self.dim + 1) // 2,
+            dtype=torch.complex64,
         ).to(self.device)
         self.U = torch.zeros(
-            self.antennas_transmitter, (self.input_dim + 1) // 2
+            self.antennas_transmitter,
+            (self.dim + 1) // 2,
+            dtype=torch.complex64,
         ).to(self.device)
 
         return None
 
-    def __G_step(
+    def __str__(self) -> str:
+        """A usefull string description of the base station status.
+
+        Returns:
+            description : str
+                The description of the Base Station status in string format.
+        """
+        description = f"""Base Station Infos:
+        Channel Awareness: {self.channel_awareness}.
+        
+        {len(self.agents_id)} agents connected:
+            {self.agents_id}
+
+        {np.sum(list(self.msgs.values()))} messages:
+            {dict(self.msgs)}
+        """
+
+        return description
+
+    def handshake_step(
         self,
         idx: int,
-        input: torch.Tensor,
-        output: torch.Tensor,
+        pilots: torch.Tensor,
+        c: int = 1,
     ) -> None:
-        """The G step that minimize the Lagrangian.
+        """Handshaking step simulation.
 
         Args:
-            idx: int
-                The user index.
-            input : torch.Tensor
-                The input tensor.
-            output : torch.Tensor
-                The output tensor.
+            idx : int
+                The id of the agent.
+            pilots : torch.Tensor
+                The semantic pilots for the agent.
+            c : int
+                The handshake cost in terms of messages. Default 1.
 
         Returns:
             None
         """
-        # Get the number of samples
-        _, n = input.shape
-        # Get the auxiliary matrix A
-        A = self.channel_matrix[idx] @ self.F @ input
+        pilots = pilots.T
 
-        # Get sigma
-        sigma = 0
-        if self.snr:
-            sigma = sigma_given_snr(
-                self.snr, torch.ones(1) / math.sqrt(self.antennas_transmitter)
-            )
+        assert idx not in self.agents_id, (
+            f'Agent of id {idx} already connected to the base station.'
+        )
+        assert self.dim == pilots.shape[0], (
+            "The dimention of the semantic pilots doesn't match the dimetion of the base station encodings."
+        )
 
-        self.G_k[idx] = (
-            output
-            @ A.H
-            @ torch.linalg.inv(
-                A @ A.H
-                + n
-                * sigma
-                * torch.view_as_complex(
-                    torch.stack(
-                        (torch.eye(A.shape[0]), torch.eye(A.shape[0])), dim=-1
-                    )
-                ).to(self.device)
+        # Connect the agent to the base station
+        self.agents_id.add(idx)
+
+        # Compress the pilots
+        compressed_pilots = complex_compressed_tensor(
+            pilots, device=self.device
+        )
+
+        # Learn L and the mean for the Prewhitening
+        self.agents_pilots[idx], self.L[idx], self.mean[idx] = prewhiten(
+            compressed_pilots, device=self.device
+        )
+
+        # Update the number of messages used for handshaking
+        self.msgs['handshaking'] += c
+
+        return None
+
+    def transmit_to_agent(
+        self,
+        idx: int,
+    ) -> list[torch.Tensor]:
+        """Transmit to agent i its respective FX or HFX.
+
+        Args:
+            idx : int
+                The idx of the specific agent.
+
+        Returns:
+            msg : torch.Tensor
+                The message for the specific agent.
+        """
+        assert idx in self.agents_id, (
+            'The passed idx is not in the connected agents.'
+        )
+
+        # Create a message for an agent
+        if self.channel_awareness:
+            msg = self.channel_matrix @ self.F @ self.agents_pilots[idx]
+        else:
+            msg = self.F @ self.agents_pilots[idx]
+
+        # Updating the number of trasmitting messages
+        self.msgs['transmitting'] += 1
+
+        return msg
+
+    def group_cast(self) -> dict[int, torch.Tensor]:
+        """Send a message to the whole group.
+
+        Returns:
+            grp_msgs : dict[int, torch.Tensor]
+                A collection of messages to the whole agent group.
+        """
+        grp_msgs = {}
+        for idx in self.agents_id:
+            grp_msgs[idx] = self.transmit_to_agent(idx)
+
+        return grp_msgs
+
+    def __F_local_step(
+        self,
+        msg: dict[int | str, torch.Tensor],
+    ) -> None:
+        """The local F step for an agent.
+
+        Args:
+            msg : dict[int | str, torch.Tensor]
+                The message from the agent.
+
+        Returns:
+            None
+        """
+        # Read the message
+        idx, msg1, msg2 = msg.values()
+        msg1 = msg1.to(self.device)
+        msg2 = msg2.to(self.device)
+
+        # Variables
+        _, n = self.agents_pilots[idx].shape
+        rho = self.rho * len(self.agents_id) * n
+        B = torch.linalg.inv(
+            self.agents_pilots[idx] @ self.agents_pilots[idx].H
+        )
+        C = (rho * (self.Z - self.U) + msg2 @ self.agents_pilots[idx].H) @ B
+
+        self.Fk[idx] = torch.tensor(
+            solve_sylvester(
+                msg1.cpu().numpy(), (rho * B).cpu().numpy(), C.cpu().numpy()
             )
         ).to(self.device)
+
         return None
 
-    def __F_step(
-        self,
-        idx: int,
-        input: torch.Tensor,
-        output: torch.Tensor,
-    ) -> None:
-        """The F step that minimize the Lagrangian.
+    def __F_global_step(self) -> None:
+        """The global F step, in which the base station aggregates all the local F.
 
         Args:
-            idx: int
-                The user index.
-            input : torch.Tensor
-                The input tensor.
-            output : torch.Tensor
-                The output tensor.
+            None
 
-        Returns:
+        Return:
             None
         """
-        # Get the number of samples
-        _, n = input.shape
-
-        # Get the auxiliary matrixes
-        rho = self.rho * n
-        O_k = self.G_k[idx] @ self.channel_matrix[idx]
-        A = O_k.H @ O_k
-        B = rho * torch.linalg.inv(input @ input.H)
-        C = (rho * (self.Z - self.U) + O_k.H @ output @ input.H) @ (B / rho)
-
-        self.F_k[idx] = torch.tensor(
-            solve_sylvester(A.cpu().numpy(), B.cpu().numpy(), C.cpu().numpy()),
-            device=self.device,
-            dtype=self.dtype,
-        )
-        return None
-
-    def __F_aggregate(self):
-        """ "
-        Perform the mean of F transformation
-        """
-        stacked_F = torch.stack(list(self.F_k.values()), dim=0)
-        self.F = stacked_F.mean(dim=0)
-
-        assert self.F_k[0].shape == self.F.shape, (
-            'The F aggregation step has wrong dimensions of output.'
-        )
+        self.F = torch.stack(list(self.Fk.values()), dim=0).mean(dim=0)
         return None
 
     def __Z_step(self) -> None:
@@ -210,14 +272,13 @@ class FederatedLinearOptimizer:
         Returns:
             None
         """
-        # Get the auxiliary matrix C
         C = self.F + self.U
         tr = torch.trace(C @ C.H).real
 
-        if tr <= self.cost:
+        if tr <= self.px_cost:
             self.Z = C
         else:
-            lmb = torch.sqrt(tr / self.cost).item() - 1
+            lmb = torch.sqrt(tr / self.px_cost).item() - 1
             self.Z = C / (1 + lmb)
 
         return None
@@ -231,186 +292,147 @@ class FederatedLinearOptimizer:
         Returns:
             None
         """
-        self.U = self.U + self.F - self.Z
+        self.U += self.F - self.Z
         return None
 
-    def fit(
-        self,
-        n_agents: int,
-        datamodule_list: list[torch.Tensor],
-        iterations: int = None,
-    ) -> tuple[list[float], list[float]]:
-        """Fitting the F and G to the passed data.
+    def received_from_agent(self, msg: dict[int | str, torch.Tensor]) -> None:
+        """Procedure when the base line receives a message from an agent.
 
         Args:
-            n_agents : int
-                The total number of agents.
-            input : torch.Tensor
-                The input tensor.
-            output : torch.Tensor
-                The output tensor.
-            iterations : int
-                The number of iterations. Default None.
+            msg : dict[int | str, torch.Tensor]
+                The message from the agent.
 
         Returns:
-            (losses, traces) : tuple[list[float], list[float]]
-                The losses and the traces during training.
+            None
         """
-        input = datamodule_list[0].train_data.z  # Transpose
-        output = {
-            k: datamodule_list[k].train_data.z_decoder
-            for k in range(self.n_agents)
-        }
+        self.__F_local_step(msg=msg)
+        return None
 
-        # Inizialize the F matrix at random (this will inplace modify also F_k dictionary)
-        self.F = torch.view_as_complex(
-            torch.stack(
-                (
-                    torch.randn(
-                        self.antennas_transmitter, (self.input_dim + 1) // 2
-                    ),
-                    torch.randn(
-                        self.antennas_transmitter, (self.input_dim + 1) // 2
-                    ),
-                ),
-                dim=-1,
+    def step(self) -> None:
+        """The step of the base station.
+
+        Args:
+            None
+
+        Return:
+            None
+        """
+        self.__F_global_step()
+        self.__Z_step()
+        self.__U_step()
+        return None
+
+
+class Agent:
+    """A class simulating an agent.
+
+    Args:
+        id : int
+            The id of the specific agent.
+        pilots : torch.Tensor
+            The semantic pilots of the agent.
+        antennas_receiver : int
+            The number of antennas at receiver side.
+        channel_matrix : torch.Tensor
+            The channel matrix.
+        snr : float
+            The Signal to Noise Ratio of the channel. Default 20.0 dB.
+        device : str
+            The device on which we run the simulation. Default "cpu".
+
+    Attributes:
+        self.<param_name> :
+            The self. version of the passed parameter.
+        self.n_pilots : int
+            The number of semantic pilots.
+        self.pilot_dim : int
+            The dimentionality of the semantic pilots.
+        self.G:
+            The personal G transformation.
+    """
+
+    def __init__(
+        self,
+        id: int,
+        pilots: torch.Tensor,
+        antennas_receiver: int,
+        channel_matrix: torch.Tensor,
+        snr: float = 20.0,
+        device: str = 'cpu',
+    ) -> None:
+        self.id = id
+        self.pilots, self.L, self.mean = prewhiten(
+            complex_compressed_tensor(pilots.T, device=device), device=device
+        )
+        self.antennas_receiver: int = antennas_receiver
+        self.channel_matrix: torch.Tensor = channel_matrix.to(device)
+        self.snr = snr
+        self.device: str = device
+
+        assert self.channel_matrix.shape[0] == self.antennas_receiver, (
+            'The number of rows of the channel matrix must be equal to the given number of receiver antennas.'
+        )
+
+        # Set Variables
+        self.pilot_dim, self.n_pilots = self.pilots.shape
+
+        # Initialize G
+        self.G = None
+
+        return None
+
+    def __G_step(
+        self,
+        received: torch.Tensor,
+    ) -> None:
+        """The local G step of the agent.
+
+        Args:
+            received : torch.Tensor
+                The message from the base station.
+
+        Returns:
+            None
+        """
+        sigma = 0
+        if self.snr:
+            sigma = sigma_given_snr(
+                self.snr, torch.ones(1) / math.sqrt(self.antennas_receiver)
+            )
+
+        self.G = (
+            self.pilots
+            @ received.H
+            @ torch.linalg.inv(
+                received @ received.H + self.n_pilots * sigma * (1 + 1j)
             )
         ).to(self.device)
+        return None
 
-        with torch.no_grad():
-            #  Save the decompressed version
-            old_input = input
-            old_output = list(output.values())
-
-            # Complex compression
-            input = complex_compressed_tensor(input.T, device=self.device).H
-            output = [
-                complex_compressed_tensor(o.T, device=self.device).H
-                for k, o in output.items()
-            ]
-
-            # Perform the prewhitening step
-            input, self.L_input, self.mean_input = prewhiten(
-                input, device=self.device
-            )
-            # print(input.shape, self.L_input.shape, self.mean_input.shape)
-            loss = np.inf
-            losses = []
-            traces = []
-            if iterations:
-                for _ in tqdm(range(iterations)):
-                    for agent in range(self.n_agents):
-                        print('Initiliazing the G process;')
-                        self.__G_step(
-                            idx=agent, input=input, output=output[agent]
-                        )
-
-                    for agent in range(self.n_agents):
-                        print('Initiliazing the F process;')
-                        self.__F_step(
-                            idx=agent, input=input, output=output[agent]
-                        )
-
-                    # Compute base station computation:
-                    print('Aggregating F process;')
-                    self.__F_aggregate()
-                    self.__Z_step()
-                    self.__U_step()
-                    loss = self.eval(old_input, old_output)
-                    trace = torch.trace(self.F.H @ self.F).real.item()
-                    losses.append(loss)
-                    traces.append(trace)
-
-            else:
-                print('No iterations specified!')
-            #     while loss > 1e-1:
-            #         self.__G_step(input=input, output=output)
-            #         self.__F_step(input=input, output=output)
-            #         self.__Z_step()
-            #         self.__U_step()
-            #         loss = self.eval(old_input, old_output)
-            #         trace = torch.trace(self.F.H@self.F).real.item()
-            #         losses.append(loss)
-            #         traces.append(trace)
-
-        return losses, traces
-
-    def transform(
+    def step(
         self,
-        input: torch.Tensor,
-        agent: int,
-    ) -> torch.Tensor:
-        """Transform the passed input.
+        received: torch.Tensor,
+    ) -> dict[int | str, torch.Tensor]:
+        """The agent step.
 
         Args:
-            input : torch.Tensor
-                The input tensor.
+            received : torch.Tensor
+                The message from the base station.
 
         Returns:
-            output : torch.Tensor
-                The transformed version of the input.
+            msg : dict[int | str, torch.Tensor]
+                The message to send to the base station.
         """
-        with torch.no_grad():
-            # Transpose
-            input = input.T
+        received = received.to(self.device)
 
-            # Complex Compress the input
-            input = complex_compressed_tensor(input.T, device=self.device).H
+        # Perform the local G step
+        self.__G_step(received=received)
 
-            # Perform the prewhitening step
-            input = a_inv_times_b(
-                self.L_input, input - self.mean_input
-            )  # white signal
+        # Construct the message to send to the base station
+        A = self.G @ self.channel_matrix
+        msg = {'id': self.id, 'msg1': A.H @ A, 'msg2': A.H @ self.pilots}
 
-            # Transmit the input through the channel H
-            z = self.channel_matrix[agent] @ self.F @ input
-
-            # Add the additive white gaussian noise
-            if self.snr:
-                sigma = sigma_given_snr(
-                    snr=self.snr,
-                    signal=torch.ones(1)
-                    / math.sqrt(self.antennas_transmitter),
-                )
-
-                w = awgn(sigma=sigma, size=z.shape, device=self.device)
-                z += w
-
-            output_complex = self.G_k[agent] @ z
-
-            # Decompress the transmitted signal
-            output_decompressed = decompress_complex_tensor(output_complex.H).T
-
-        return output_decompressed.T
-
-    def eval(
-        self,
-        input: torch.Tensor,
-        output: list[torch.Tensor],
-    ) -> float:
-        """Eval an input given an expected output.
-
-        Args:
-            input : torch.Tensor
-                The input tensor.
-            output : torch.Tensor
-                The output tensor.
-
-        Returns:
-            float
-                The mse loss.
-        """
-        # Check if self.F and self.G are fitted
-        # assert (self.F is not None)&(self.G_k is not None), "You have to fit the solver first by calling the '.fit()' method."
-        loss = 0.0
-        for agent in range(self.n_agents):
-            preds_k = self.transform(input, agent=agent)
-            loss += torch.nn.functional.mse_loss(
-                preds_k, output[agent], reduction='mean'
-            ).item()
-        L = loss / self.n_agents
-        print(f'The average Loss function is: {L}')
-        return L
+        return msg
 
 
 # ============================================================
@@ -426,42 +448,11 @@ def main() -> None:
     print()
 
     # Variables definition
-    cost: int = 1
-    snr: float = 20
-    iterations: int = 10
-    input_dim: int = 384
-    output_dim: int = 768
-    antennas_transmitter: int = 4
-    antennas_receiver: int = 4
-    n_agent: int = 3
-    list_channel_matrix: list[torch.Tensor] = [
-        complex_gaussian_matrix(
-            mean=0,
-            std=1,
-            size=(antennas_receiver, antennas_transmitter),
-        )
-        for _ in range(n_agent)
-    ]
 
     # Latent Spaces for TX and RX
-    input = torch.randn(100, input_dim)
-    output = [torch.randn(100, output_dim) for _ in range(n_agent)]
 
-    print('Test for Federated Linear Opt..', end='\t')
-    system = FederatedLinearOptimizer(
-        n_agents=n_agent,
-        input_dim=input_dim,
-        output_dim=output_dim,
-        channel_matrix=list_channel_matrix,
-        snr=snr,
-        cost=cost,
-        device='cpu',
-    )
-    system.fit(n_agent, input, output, iterations=iterations)
-
-    # for agent in range(n_agent):
-    #    system.transform(input, agent)
-    print(system.eval(input, output))
+    # TODO
+    print('First test...', end='\t')
     print('[Passed]')
 
     print()

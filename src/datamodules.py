@@ -22,19 +22,19 @@ class CustomDataset(Dataset):
     """A custom implementation of a Pytorch Dataset.
 
     Args:
-        encoder_path : Path
-            The path to the encoder.
-        decider_path : Path
-            The path to the decoder.
+        tx_path : Path
+            The path to the tx encoding model.
+        rx_path : Path
+            The path to the rx encoding model.
 
     Attributes:
         The self.<arg_name> version of the arguments documented above.
-        self.z : torch.Tensor
-            The absolute representation of the Dataset encoder side.
+        self.z_tx : torch.Tensor
+            The absolute representation of the Dataset transmitter side.
         self.labels : torch.Tensor
             The labels of the Dataset.
-        self.z_decoder : torch.Tensor
-            The absolute representation of the Dataset decoder side.
+        self.z_rx : torch.Tensor
+            The absolute representation of the Dataset receiver side.
         self.input_size : int
             The size of the input of the network.
         self.output_size : int
@@ -43,41 +43,41 @@ class CustomDataset(Dataset):
 
     def __init__(
         self,
-        encoder_path: Path,
-        decoder_path: Path,
+        tx_path: Path,
+        rx_path: Path,
     ):
-        self.encoder_path: Path = encoder_path
-        self.decoder_path: Path = decoder_path
+        self.tx_path: Path = tx_path
+        self.rx_path: Path = rx_path
 
         # =================================================
         #                 Encoder Stuff
         # =================================================
-        encoder_blob = torch.load(self.encoder_path, weights_only=True)
+        tx_blob = torch.load(self.tx_path, weights_only=True)
 
-        # Retrieve the absolute representation from the encoder
-        self.z = encoder_blob['absolute']
+        # Retrieve the absolute representation from the transmitter
+        self.z_tx = tx_blob['absolute']
 
         # Retrieve the labels
-        self.labels = encoder_blob['labels']
+        self.labels = tx_blob['labels']
 
-        del encoder_blob
+        del tx_blob
 
         # =================================================
         #                 Decoder Stuff
         # =================================================
-        decoder_blob = torch.load(self.decoder_path, weights_only=True)
+        rx_blob = torch.load(self.rx_path, weights_only=True)
 
-        # Retrieve the absolute representation from the decoder
-        self.z_decoder = decoder_blob['absolute']
+        # Retrieve the absolute representation from the receiver
+        self.z_rx = rx_blob['absolute']
 
-        del decoder_blob
+        del rx_blob
 
         # =================================================
         #         Get the input and the output size
         # =================================================
         # When the input is only the absolute representation
-        self.input_size = self.z.shape[-1]
-        self.output_size = self.z_decoder.shape[-1]
+        self.input_size = self.z_tx.shape[-1]
+        self.output_size = self.z_rx.shape[-1]
 
     def __len__(self) -> int:
         """Returns the length of the Dataset.
@@ -86,7 +86,7 @@ class CustomDataset(Dataset):
             int
                 Length of the Dataset.
         """
-        return len(self.z)
+        return len(self.z_tx)
 
     def __getitem__(
         self,
@@ -99,14 +99,14 @@ class CustomDataset(Dataset):
                 The index of the wanted row.
 
         Returns:
-            (input, r_i) : tuple[torch.Tensor, torch.Tensor]
+            (input, output) : tuple[torch.Tensor, torch.Tensor]
                 The inputs and target as a tuple of tensors.
         """
         # Get the absolute representation of element idx
-        input = self.z[idx]
+        input = self.z_tx[idx]
 
         # Get the absolute representation of element idx
-        output = self.z_decoder[idx]
+        output = self.z_rx[idx]
 
         return input, output
 
@@ -139,15 +139,15 @@ class DatasetClassifier(Dataset):
         # =================================================
         #                 Get the Data
         # =================================================
-        decoder_blob = torch.load(self.path, weights_only=True)
+        rx_blob = torch.load(self.path, weights_only=True)
 
-        # Retrieve the absolute representation from the decoder
-        self.input = decoder_blob['absolute']
+        # Retrieve the absolute representation from the receiver
+        self.input = rx_blob['absolute']
 
         # Retrieve the labels
-        self.labels = decoder_blob['labels']
+        self.labels = rx_blob['labels']
 
-        del decoder_blob
+        del rx_blob
 
         # =================================================
         #         Get the input and the output size
@@ -200,10 +200,10 @@ class DataModule(LightningDataModule):
     Args:
         dataset : str
             The name of the dataset.
-        encoder : str
-            The name of the encoder.
-        decoder : str
-            The name of the decoder.
+        tx_enc : str
+            The name of the encoder transmitter side.
+        rx_enc : str
+            The name of the encoder transmitter side.
         batch_size : int
             The size of a batch. Default 128.
         num_workers : int
@@ -217,16 +217,16 @@ class DataModule(LightningDataModule):
     def __init__(
         self,
         dataset: str,
-        encoder: str,
-        decoder: str,
+        tx_enc: str,
+        rx_enc: str,
         batch_size: int = 128,
         num_workers: int = 0,
     ) -> None:
         super().__init__()
 
         self.dataset: str = dataset
-        self.encoder: str = encoder
-        self.decoder: str = decoder
+        self.tx_enc: str = tx_enc
+        self.rx_enc: str = rx_enc
         self.batch_size: int = batch_size
         self.num_workers: int = num_workers
 
@@ -281,16 +281,16 @@ class DataModule(LightningDataModule):
         GENERAL_PATH: Path = CURRENT / 'data/latents' / self.dataset
 
         self.train_data = CustomDataset(
-            encoder_path=GENERAL_PATH / 'train' / f'{self.encoder}.pt',
-            decoder_path=GENERAL_PATH / 'train' / f'{self.decoder}.pt',
+            tx_path=GENERAL_PATH / 'train' / f'{self.tx_enc}.pt',
+            rx_path=GENERAL_PATH / 'train' / f'{self.rx_enc}.pt',
         )
         self.test_data = CustomDataset(
-            encoder_path=GENERAL_PATH / 'test' / f'{self.encoder}.pt',
-            decoder_path=GENERAL_PATH / 'test' / f'{self.decoder}.pt',
+            tx_path=GENERAL_PATH / 'test' / f'{self.tx_enc}.pt',
+            rx_path=GENERAL_PATH / 'test' / f'{self.rx_enc}.pt',
         )
         self.val_data = CustomDataset(
-            encoder_path=GENERAL_PATH / 'val' / f'{self.encoder}.pt',
-            decoder_path=GENERAL_PATH / 'val' / f'{self.decoder}.pt',
+            tx_path=GENERAL_PATH / 'val' / f'{self.tx_enc}.pt',
+            rx_path=GENERAL_PATH / 'val' / f'{self.rx_enc}.pt',
         )
 
         assert (
@@ -370,8 +370,8 @@ class DataModuleClassifier(LightningDataModule):
     Args:
         dataset : str
             The name of the dataset.
-        decoder : str
-            The name of the decoder.
+        rx_enc : str
+            The name of the receiver encoder.
         batch_size : int
             The size of a batch. Default 128.
         num_workers : int
@@ -385,14 +385,14 @@ class DataModuleClassifier(LightningDataModule):
     def __init__(
         self,
         dataset: str,
-        decoder: str,
+        rx_enc: str,
         batch_size: int = 128,
         num_workers: int = 0,
     ) -> None:
         super().__init__()
 
         self.dataset: str = dataset
-        self.decoder: str = decoder
+        self.rx_enc: str = rx_enc
         self.batch_size: int = batch_size
         self.num_workers: int = num_workers
 
@@ -444,13 +444,13 @@ class DataModuleClassifier(LightningDataModule):
         GENERAL_PATH: Path = CURRENT / 'data/latents' / self.dataset
 
         self.train_data = DatasetClassifier(
-            path=GENERAL_PATH / 'train' / f'{self.decoder}.pt'
+            path=GENERAL_PATH / 'train' / f'{self.rx_enc}.pt'
         )
         self.test_data = DatasetClassifier(
-            path=GENERAL_PATH / 'test' / f'{self.decoder}.pt'
+            path=GENERAL_PATH / 'test' / f'{self.rx_enc}.pt'
         )
         self.val_data = DatasetClassifier(
-            path=GENERAL_PATH / 'val' / f'{self.decoder}.pt'
+            path=GENERAL_PATH / 'val' / f'{self.rx_enc}.pt'
         )
 
         assert (
@@ -534,7 +534,7 @@ def main() -> None:
     decoder = 'vit_base_patch16_224'
 
     print('Running first test...', end='\t')
-    data = DataModule(dataset=dataset, encoder=encoder, decoder=decoder)
+    data = DataModule(dataset=dataset, tx_enc=encoder, rx_enc=decoder)
 
     data.prepare_data()
     data.setup()
@@ -545,7 +545,7 @@ def main() -> None:
     print('[Passed]')
 
     print('Running second test...', end='\t')
-    data = DataModuleClassifier(dataset=dataset, decoder=decoder)
+    data = DataModuleClassifier(dataset=dataset, rx_enc=decoder)
 
     data.prepare_data()
     data.setup()
