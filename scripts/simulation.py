@@ -89,7 +89,9 @@ def main() -> None:
         # (i) Agents performs local G and F steps
         # (ii) Agents send msg1 and msg2 to the base station
         for idx, agent in agents.items():
-            a_msg = agent.step(grp_msgs[idx])
+            a_msg = agent.step(
+                grp_msgs[idx], channel_awareness=base_station.channel_awareness
+            )
             base_station.received_from_agent(msg=a_msg)
 
         # Base Station computes global F, Z and U steps
