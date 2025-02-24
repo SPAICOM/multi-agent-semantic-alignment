@@ -11,6 +11,15 @@ from torch.utils.data import Dataset, DataLoader
 from pytorch_lightning import LightningDataModule
 
 
+if __name__ == '__main__':
+    from download_utils import (
+        download_data,
+    )
+else:
+    from src.download_utils import (
+        download_data,
+    )
+
 # =====================================================
 #
 #                 DATASETS DEFINITION
@@ -236,31 +245,13 @@ class DataModule(LightningDataModule):
         Returns:
             None
         """
-        from gdown import download
-        from zipfile import ZipFile
         from dotenv import dotenv_values
 
-        CURRENT = Path('.')
-        DATA_DIR = CURRENT / 'data'
-        ZIP_PATH = DATA_DIR / 'latents.zip'
-        DIR_PATH = DATA_DIR / 'latents/'
+        # Get from the .env file the zip file Google Drive ID
+        ID = dotenv_values()['DATA_ID']
 
-        # Make sure that DATA_DIR exists
-        DATA_DIR.mkdir(exist_ok=True)
-
-        # Check if the zip file is already in the path
-        if not ZIP_PATH.exists():
-            # Get from the .env file the zip file Google Drive ID
-            ID = dotenv_values()['DATA_ID']
-
-            # Download the zip file
-            download(id=ID, output=str(ZIP_PATH))
-
-        # Check if the directory exists
-        if not DIR_PATH.is_dir():
-            # Unzip the zip file
-            with ZipFile(ZIP_PATH, 'r') as zip_ref:
-                zip_ref.extractall(ZIP_PATH.parent)
+        # Download and unzip the data
+        download_data(ID, name='latents')
 
         return None
 
@@ -402,31 +393,13 @@ class DataModuleClassifier(LightningDataModule):
         Returns:
             None
         """
-        from gdown import download
-        from zipfile import ZipFile
         from dotenv import dotenv_values
 
-        CURRENT = Path('.')
-        DATA_DIR = CURRENT / 'data'
-        ZIP_PATH = DATA_DIR / 'latents.zip'
-        DIR_PATH = DATA_DIR / 'latents/'
+        # Get from the .env file the zip file Google Drive ID
+        ID = dotenv_values()['DATA_ID']
 
-        # Make sure that DATA_DIR exists
-        DATA_DIR.mkdir(exist_ok=True)
-
-        # Check if the zip file is already in the path
-        if not ZIP_PATH.exists():
-            # Get from the .env file the zip file Google Drive ID
-            ID = dotenv_values()['DATA_ID']
-
-            # Download the zip file
-            download(id=ID, output=str(ZIP_PATH))
-
-        # Check if the directory exists
-        if not DIR_PATH.is_dir():
-            # Unzip the zip file
-            with ZipFile(ZIP_PATH, 'r') as zip_ref:
-                zip_ref.extractall(ZIP_PATH.parent)
+        # Download and unzip the data
+        download_data(ID, name='latents')
 
         return None
 
