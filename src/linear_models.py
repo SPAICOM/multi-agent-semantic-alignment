@@ -7,6 +7,7 @@ from scipy.linalg import solve_sylvester
 if __name__ == '__main__':
     from utils import (
         complex_compressed_tensor,
+        complex_gaussian_matrix,
         prewhiten,
         sigma_given_snr,
     )
@@ -384,6 +385,7 @@ class Agent:
     def __G_step(
         self,
         received: torch.Tensor,
+        channel_awareness: bool,
     ) -> None:
         """The local G step of the agent.
 
@@ -400,6 +402,9 @@ class Agent:
                 self.snr, torch.ones(1) / math.sqrt(self.antennas_receiver)
             )
 
+        if not channel_awareness:
+            received = self.channel_matrix @ received
+
         self.G = (
             self.pilots
             @ received.H
@@ -412,6 +417,7 @@ class Agent:
     def step(
         self,
         received: torch.Tensor,
+        channel_awareness: bool,
     ) -> dict[int | str, torch.Tensor]:
         """The agent step.
 
@@ -426,7 +432,7 @@ class Agent:
         received = received.to(self.device)
 
         # Perform the local G step
-        self.__G_step(received=received)
+        self.__G_step(received=received, channel_awareness=channel_awareness)
 
         # Construct the message to send to the base station
         A = self.G @ self.channel_matrix
@@ -448,11 +454,57 @@ def main() -> None:
     print()
 
     # Variables definition
+    n: int = 100
+    iterations: int = 1
+    tx_dim: int = 384
+    rx_dim: int = 768
+    antennas_transmitter: int = 4
+    antennas_receiver: int = 4
+    channel_matrix: torch.Tensor = complex_gaussian_matrix(
+        mean=0, std=1, size=(antennas_receiver, antennas_transmitter)
+    )
 
-    # Latent Spaces for TX and RX
+    # Get the semantic pilots
+    tx_pilots: torch.Tensor = torch.randn(n, tx_dim)
+    rx_pilots: torch.Tensor = torch.randn(n, rx_dim)
 
-    # TODO
     print('First test...', end='\t')
+    # Agents Initialization
+    agents = {
+        0: Agent(
+            id=0,
+            pilots=rx_pilots,
+            antennas_receiver=antennas_receiver,
+            channel_matrix=channel_matrix,
+        )
+    }
+
+    # Base Station Initialization
+    base_station = BaseStation(
+        dim=tx_dim,
+        antennas_transmitter=antennas_transmitter,
+        channel_matrix=channel_matrix,
+    )
+
+    # Perform Handshaking
+    for agent_id in agents:
+        base_station.handshake_step(idx=agent_id, pilots=tx_pilots)
+
+    # Base Station - Agent alignment
+    for i in range(iterations):
+        # Base Station transmits FX or HFX (depends if Base Station is channel aware or not)
+        grp_msgs = base_station.group_cast()
+
+        # (i) Agents performs local G and F steps
+        # (ii) Agents send msg1 and msg2 to the base station
+        for idx, agent in agents.items():
+            a_msg = agent.step(
+                grp_msgs[idx], channel_awareness=base_station.channel_awareness
+            )
+            base_station.received_from_agent(msg=a_msg)
+
+        # Base Station computes global F, Z and U steps
+        base_station.step()
     print('[Passed]')
 
     print()
