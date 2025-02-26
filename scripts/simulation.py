@@ -34,9 +34,12 @@ def main(cfg: DictConfig) -> None:
     seed_everything(cfg.seed, workers=True)
 
     # Channel Initialization
-    channel_matrix: torch.Tensor = complex_gaussian_matrix(
-        0, 1, (cfg.antennas_receiver, cfg.antennas_transmitter)
-    )
+    channel_matrixes: dict[int : torch.Tensor] = {
+        idx: complex_gaussian_matrix(
+            0, 1, (cfg.antennas_receiver, cfg.antennas_transmitter)
+        )
+        for idx, _ in enumerate(cfg.agents_models)
+    }
 
     # Datamodules Initialization
     datamodules: dict[int, DataModule] = {
@@ -59,7 +62,7 @@ def main(cfg: DictConfig) -> None:
             id=idx,
             pilots=datamodule.train_data.z_rx,
             antennas_receiver=cfg.antennas_receiver,
-            channel_matrix=channel_matrix,
+            channel_matrix=channel_matrixes[idx],
             snr=cfg.snr,
             device=cfg.device,
         )
@@ -73,7 +76,7 @@ def main(cfg: DictConfig) -> None:
     base_station: BaseStation = BaseStation(
         dim=transmitter_dim,
         antennas_transmitter=cfg.antennas_transmitter,
-        channel_matrix=channel_matrix if cfg.channel_aware else None,
+        # channel_matrixex=channel_matrixex if cfg.channel_aware else None,
         rho=cfg.rho,
         px_cost=cfg.px_cost,
         device=cfg.device,
@@ -83,7 +86,9 @@ def main(cfg: DictConfig) -> None:
     print()
     for agent_id in tqdm(agents, desc='Handshaking Procedure'):
         base_station.handshake_step(
-            idx=agent_id, pilots=datamodules[agent_id].train_data.z_tx
+            idx=agent_id,
+            pilots=datamodules[agent_id].train_data.z_tx,
+            channel_matrix=channel_matrixes[agent_id],
         )
 
     # Base Station - Agent alignment
@@ -96,7 +101,8 @@ def main(cfg: DictConfig) -> None:
         # (ii) Agents send msg1 and msg2 to the base station
         for idx, agent in agents.items():
             a_msg = agent.step(
-                grp_msgs[idx], channel_awareness=base_station.channel_awareness
+                grp_msgs[idx],
+                channel_awareness=base_station.is_channel_aware(idx),
             )
             base_station.received_from_agent(msg=a_msg)
 

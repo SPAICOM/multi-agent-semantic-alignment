@@ -38,22 +38,24 @@ class BaseStation:
             The rho coeficient for the admm method. Default 1e2.
         px_cost : int
             The transmitter power constraint. Default 1.
-        channel_matrix : torch.Tensor
-            The channel matrix. Set to None for the channel unaware case. Default None.
         device : str
             The device on which we run the simulation. Default "cpu".
 
     Attributes:
         self.<param_name> :
             The self. version of the passed parameter.
+        self.L : dict[int, torch.Tensor]
+            The L matrix for prewhitening the messages for a specific agent.
+        self.mean : dict[int, float]
+            The mean needed for prewhitening the messages for a specific agent.
         self.agents_id : set[int]
             The set of agents IDs that are connected to this base station.
         self.agents_pilot : dict[int, torch.Tensor]
             The semantic pilots for the specific agent, already complex compressed and prewhitened.
         self.msgs : dict[str, int]
             The total messages.
-        self.channel_awareness : bool
-            The channel awareness of the base station.
+        self.channel_matrixes : dict[int, torch.Tensor]
+            The channel matrix for each agent.
         self.F : torch.Tensor
             The global F transformation.
         self.Fk : dict[int, torch.Tensor]
@@ -70,27 +72,21 @@ class BaseStation:
         antennas_transmitter: int,
         rho: float = 1e2,
         px_cost: int = 1,
-        channel_matrix: torch.Tensor = None,
         device: str = 'cpu',
     ) -> None:
         self.dim: int = dim
         self.antennas_transmitter: int = antennas_transmitter
         self.rho: float = rho
         self.px_cost: int = px_cost
-        self.channel_matrix: torch.Tensor = channel_matrix
         self.device: str = device
 
         # Attributes Initialization
-        self.L = {}
-        self.mean = {}
-        self.agents_id = set()
-        self.agents_pilots = {}
-        self.msgs = defaultdict(int)
-        self.channel_awareness = self.channel_matrix is not None
-
-        # Set the channl matrix to the device
-        if self.channel_awareness:
-            self.channel_matrix = self.channel_matrix.to(device)
+        self.L: dict[int, torch.Tensor] = {}
+        self.mean: dict[int, float] = {}
+        self.agents_id: set[int] = set()
+        self.agents_pilots: dict[int, torch.Tensor] = {}
+        self.msgs: defaultdict = defaultdict(int)
+        self.channel_matrixes: dict[int, torch.Tensor] = {}
 
         # Initialize Global F at random and locals
         self.F = torch.randn(
@@ -136,6 +132,7 @@ class BaseStation:
         self,
         idx: int,
         pilots: torch.Tensor,
+        channel_matrix: torch.Tensor,
         c: int = 1,
     ) -> None:
         """Handshaking step simulation.
@@ -162,6 +159,9 @@ class BaseStation:
 
         # Connect the agent to the base station
         self.agents_id.add(idx)
+
+        # Add channel matrix
+        self.channel_matrixes[idx] = channel_matrix.to(self.device)
 
         # Compress the pilots
         compressed_pilots = complex_compressed_tensor(
@@ -197,8 +197,8 @@ class BaseStation:
         )
 
         # Create a message for an agent
-        if self.channel_awareness:
-            msg = self.channel_matrix @ self.F @ self.agents_pilots[idx]
+        if self.is_channel_aware(idx):
+            msg = self.channel_matrixes[idx] @ self.F @ self.agents_pilots[idx]
         else:
             msg = self.F @ self.agents_pilots[idx]
 
@@ -307,6 +307,22 @@ class BaseStation:
         """
         self.U += self.F - self.Z
         return None
+
+    def is_channel_aware(
+        self,
+        idx: int,
+    ) -> bool:
+        """Check if the communication between the base station and agent idx is channel aware or not.
+
+        Args:
+            idx : int
+                The index of the agent.
+
+        Returns:
+            bool
+                If the base station for this communication is channel aware or not.
+        """
+        return self.channel_matrixes[idx] is not None
 
     def received_from_agent(self, msg: dict[int | str, torch.Tensor]) -> None:
         """Procedure when the base line receives a message from an agent.
