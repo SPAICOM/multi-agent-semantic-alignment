@@ -166,11 +166,15 @@ if __name__ == "__main__":
     dataset_name: str = "cifar10"
     transformer_names = list(
         {
-            
-            #"vit_small_patch16_224",
-            #"vit_base_patch16_224",
+            "mobilenetv3_small_100",
+            "mobilenetv3_large_100",
+            "mobilenetv3_small_075",
+             "vit_base_resnet50_384",
+            "vit_base_patch32_clip_224",
+            "rexnet_100",
+             "vit_base_resnet50_384"
         }
-    )
+    )  
 
 
     CACHE_LATENTS: bool = True

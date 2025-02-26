@@ -1,34 +1,23 @@
-"""
-This python module computes a simulation of a Base Station communicating with a group of agents.
-"""
-
 # Add root to the path
 import sys
-import math
+import typing
 from pathlib import Path
-import hydra
-from scipy.linalg import solve_sylvester
-from hydra.core import config_store
 sys.path.append(str(Path(sys.path[0]).parent))
-import torch
+if typing.TYPE_CHECKING:
+    import torch
 from tqdm.auto import tqdm
+from omegaconf import DictConfig
 from pytorch_lightning import seed_everything
 from src.datamodules import DataModule
 from src.utils import complex_gaussian_matrix
 from src.linear_models import BaseStation, Agent
-from src.utils import sigma_given_snr
 
-# =============================================================
-#
-#                     THE MAIN LOOP
-#
-# =============================================================
 
 def main() -> None:
     """The main loop."""
     # Variables Definition
     seed: int = 42
-    iterations: int = 20
+    iterations: int = 10
     dataset: str = 'cifar10'
     antennas_transmitter: int = 4
     antennas_receiver: int = 4
@@ -83,22 +72,21 @@ def main() -> None:
         base_station.handshake_step(
             idx=agent_id, pilots=datamodules[agent_id].train_data.z_tx
         )
-    # Base Station - Agent alignment
-    for i in tqdm(range(iterations)):
-        # Base Station transmits FX or HFX (depends if Base Station is channel aware or not)
-        grp_msgs = base_station.group_cast()
-
-        # (i) Agents performs local G and F steps
-        # (ii) Agents send msg1 and msg2 to the base station
-        for idx, agent in agents.items():
-            a_msg = agent.step(grp_msgs[idx])
-            base_station.received_from_agent(msg=a_msg)
-
-        # Base Station computes global F, Z and U steps
+    for agent_id in agents:
+        base_station.disjoint_alignment( agents[agent_id].pilots, agent_id)
+        
+    for _ in range(iterations): 
+        
+        for agent_id in agents:
+            base_station.G_step_bs(agent_id)
+            
+        for agent_id in agents:
+            base_station.F_step_bs(agent_id)
+        
+        #Update F, Z, U 
         base_station.step()
-       
-    return None
-
-
-if __name__ == '__main__':
+    
+    return None            
+        
+if __name__ == "__main__":
     main()

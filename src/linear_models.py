@@ -1,8 +1,14 @@
 import math
 import torch
 import numpy as np
+from tqdm.auto import tqdm
 from collections import defaultdict
 from scipy.linalg import solve_sylvester
+from dataclasses import dataclass,field
+#To remove after trials 
+from src.datamodules import DataModule
+from pytorch_lightning import seed_everything
+from src.utils import complex_gaussian_matrix
 
 if __name__ == '__main__':
     from utils import (
@@ -17,12 +23,12 @@ else:
         sigma_given_snr,
     )
 
-
 # ============================================================
 #
 #                    CLASSES DEFINITION
 #
 # ============================================================
+
 class BaseStation:
     """A class simulating a Base Station.
 
@@ -69,6 +75,7 @@ class BaseStation:
         px_cost: int = 1,
         channel_matrix: torch.Tensor = None,
         device: str = 'cpu',
+        snr : float = 20.0
     ) -> None:
         self.dim: int = dim
         self.antennas_transmitter: int = antennas_transmitter
@@ -76,7 +83,8 @@ class BaseStation:
         self.px_cost: int = px_cost
         self.channel_matrix: torch.Tensor = channel_matrix
         self.device: str = device
-
+        self.snr = snr
+        
         # Attributes Initialization
         self.L = {}
         self.mean = {}
@@ -85,10 +93,11 @@ class BaseStation:
         self.msgs = defaultdict(int)
         self.channel_awareness = self.channel_matrix is not None
 
-        # Set the channl matrix to the device
+        # Set the channel matrix to the device
         if self.channel_awareness:
             self.channel_matrix = self.channel_matrix.to(device)
-
+        #Initialize G variable for local baseline process
+        self.G : dict[int:torch.Tensor] = {}
         # Initialize Global F at random and locals
         self.F = torch.randn(
             (self.antennas_transmitter, (self.dim + 1) // 2),
@@ -107,9 +116,9 @@ class BaseStation:
             (self.dim + 1) // 2,
             dtype=torch.complex64,
         ).to(self.device)
-
+        self.W = {idx:None for idx in range(len(self.agents_pilots))}
         return None
-
+    
     def __str__(self) -> str:
         """A usefull string description of the base station status.
 
@@ -128,12 +137,54 @@ class BaseStation:
         """
 
         return description
+    
+    def disjoint_alignment(self,
+                           rx_pilot: torch.Tensor,
+                           idx:int):
+        """ Disjoint alignment of the agents to the base station by MSE;
+            Baseline implementation.
+            -Args: rx_pilots: RX pilots of i^th agent.
+                   idx:       index of i^th agent
+            -Return:None
+        """
+        self.W[idx] = torch.linalg.lstsq(self.agents_pilots[idx].H.unsqueeze(0), 
+                                         rx_pilot.H.unsqueeze(0)).solution.squeeze(0).T
+        return None 
+    
+    def G_step_bs(self,
+                  idx:int):
+        """The Baseline G-step of the BS at the idx^th agent.
+           Baseline case G has dimension (d/2 x N_TX)
+        
+        """
+        _,n = self.agents_pilots[idx].shape
+        sigma= 0
+        sigma = sigma_given_snr(self.snr, torch.ones(1)/math.sqrt(self.antennas_transmitter))
+        X = self.agents_pilots[idx]
+        HFX = self.channel_matrix @ self.F @ self.agents_pilots[idx]
+        self.G[idx] = (X @ HFX.H @ torch.linalg.inv(HFX @ HFX.H + n * sigma * torch.view_as_complex(torch.stack((torch.eye(HFX.shape[0]), torch.eye(HFX.shape[0])), dim=-1)).to(self.device))).to(self.device)
+        return None
+    
+    def F_step_bs(self, 
+                idx:int):
+        """ The Baseline F-step of the BS at the idx^th agent.
+        """
+        X = self.agents_pilots[idx]
+        _, n = X.shape
+        rho = self.rho * n
+        O = self.G[idx] @ self.channel_matrix
+        A = O.H @ O
+        B = rho * torch.linalg.inv(X @ X.H)
+        C = (rho * (self.Z - self.U) + O.H @ X @ X.H) @ (B/rho)
 
+        self.Fk[idx] = torch.tensor(solve_sylvester(A.cpu().numpy(), B.cpu().numpy(), C.cpu().numpy()), device=self.device, dtype=self.channel_matrix.dtype)
+        return None
+        
     def handshake_step(
         self,
         idx: int,
         pilots: torch.Tensor,
-        c: int = 1,
+        c: int = 1
     ) -> None:
         """Handshaking step simulation.
 
@@ -164,7 +215,6 @@ class BaseStation:
         compressed_pilots = complex_compressed_tensor(
             pilots, device=self.device
         )
-
         # Learn L and the mean for the Prewhitening
         self.agents_pilots[idx], self.L[idx], self.mean[idx] = prewhiten(
             compressed_pilots, device=self.device
@@ -241,7 +291,7 @@ class BaseStation:
         B = torch.linalg.inv(
             self.agents_pilots[idx] @ self.agents_pilots[idx].H
         )
-        C = (rho * (self.Z - self.U) + msg2 @ self.agents_pilots[idx].H) @ B
+        C = (rho * (self.Z - self.U) + msg2 @ self.agents_pilots[idx].H) @ B 
 
         self.Fk[idx] = torch.tensor(
             solve_sylvester(
@@ -433,31 +483,21 @@ class Agent:
         msg = {'id': self.id, 'msg1': A.H @ A, 'msg2': A.H @ self.pilots}
 
         return msg
-
-
+    
+    
 # ============================================================
 #
 #                     MAIN DEFINITION
 #
 # ============================================================
-
-
 def main() -> None:
     """Some sanity tests..."""
     print('Start performing sanity tests...')
     print()
-
-    # Variables definition
-
-    # Latent Spaces for TX and RX
-
-    # TODO
-    print('First test...', end='\t')
-    print('[Passed]')
-
-    print()
     return None
-
 
 if __name__ == '__main__':
     main()
+
+
+
