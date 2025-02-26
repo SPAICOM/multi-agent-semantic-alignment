@@ -19,6 +19,10 @@ from pytorch_lightning import LightningDataModule
 
 
 class CustomDataset(Dataset):
+    
+    def __init__(self,
+                 path: Path):
+        self.path: Path = path
     """A custom implementation of a Pytorch Dataset.
 
     Args:
@@ -50,7 +54,7 @@ class CustomDataset(Dataset):
         self.rx_path: Path = rx_path
 
         # =================================================
-        #                 Encoder Stuff
+        #               Latent Absolute Data
         # =================================================
         tx_blob = torch.load(self.tx_path, weights_only=True)
 
