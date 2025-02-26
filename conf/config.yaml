@@ -11,6 +11,7 @@ agents_models:
   - vit_small_patch16_224
   - vit_small_patch32_224
   - vit_base_patch16_224
+channel_aware: true
 rho: 1e2
 px_cost: 1.0
 snr: 20.0

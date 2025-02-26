@@ -24,6 +24,8 @@ else:
 #                    CLASSES DEFINITION
 #
 # ============================================================
+
+
 class BaseStation:
     """A class simulating a Base Station.
 
@@ -261,7 +263,17 @@ class BaseStation:
         Return:
             None
         """
+        # Check if all agents did transmit their message
+        assert len(self.Fk) == len(self.agents_id), (
+            f'The following agents did not communicate with the base station:\n\t{self.agents_id - set(self.Fk.keys())}'
+        )
+
+        # Performe aggregation of the F
         self.F = torch.stack(list(self.Fk.values()), dim=0).mean(dim=0)
+
+        # Clean local F
+        self.Fk = {}
+
         return None
 
     def __Z_step(self) -> None:

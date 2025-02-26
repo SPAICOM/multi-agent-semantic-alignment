@@ -53,6 +53,7 @@ def main(cfg: DictConfig) -> None:
         datamodule.setup()
 
     # Agents Initialization
+    print()
     agents: dict[int, Agent] = {
         idx: Agent(
             id=idx,
@@ -62,7 +63,9 @@ def main(cfg: DictConfig) -> None:
             snr=cfg.snr,
             device=cfg.device,
         )
-        for idx, datamodule in datamodules.items()
+        for idx, datamodule in tqdm(
+            datamodules.items(), desc='Agents Initialization'
+        )
     }
 
     # Base Station Initialization
@@ -70,20 +73,22 @@ def main(cfg: DictConfig) -> None:
     base_station: BaseStation = BaseStation(
         dim=transmitter_dim,
         antennas_transmitter=cfg.antennas_transmitter,
-        channel_matrix=channel_matrix,
+        channel_matrix=channel_matrix if cfg.channel_aware else None,
         rho=cfg.rho,
         px_cost=cfg.px_cost,
         device=cfg.device,
     )
 
     # Perform Handshaking
-    for agent_id in agents:
+    print()
+    for agent_id in tqdm(agents, desc='Handshaking Procedure'):
         base_station.handshake_step(
             idx=agent_id, pilots=datamodules[agent_id].train_data.z_tx
         )
 
     # Base Station - Agent alignment
-    for i in tqdm(range(cfg.iterations)):
+    print()
+    for i in tqdm(range(cfg.iterations), desc='Semantic Alignment'):
         # Base Station transmits FX or HFX (depends if Base Station is channel aware or not)
         grp_msgs: dict[int, torch.Tensor] = base_station.group_cast()
 
