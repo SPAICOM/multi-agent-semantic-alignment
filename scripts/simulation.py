@@ -27,7 +27,13 @@ from src.linear_models import BaseStation, Agent
 #                     THE MAIN LOOP
 #
 # =============================================================
-@hydra.main(config_path='../conf', config_name='config', version_base='1.3')
+
+
+@hydra.main(
+    config_path='../conf/train_linear',
+    config_name='train_linear',
+    version_base='1.3',
+)
 def main(cfg: DictConfig) -> None:
     """The main loop."""
     # Setting the seed
