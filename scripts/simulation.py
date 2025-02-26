@@ -42,19 +42,24 @@ def main(cfg: DictConfig) -> None:
     # Channels Initialization
     channel_matrixes: dict[int : torch.Tensor] = {
         idx: complex_gaussian_matrix(
-            0, 1, (cfg.antennas_receiver, cfg.antennas_transmitter)
+            0,
+            1,
+            (
+                cfg.communication_channel.antennas_receiver,
+                cfg.communication_channel.antennas_transmitter,
+            ),
         )
-        for idx, _ in enumerate(cfg.agents_models)
+        for idx, _ in enumerate(cfg.agents.models)
     }
 
     # Datamodules Initialization
     datamodules: dict[int, DataModule] = {
         idx: DataModule(
             dataset=cfg.dataset,
-            tx_enc=cfg.base_station_model,
+            tx_enc=cfg.base_station.model,
             rx_enc=agent_model,
         )
-        for idx, agent_model in enumerate(cfg.agents_models)
+        for idx, agent_model in enumerate(cfg.agents.models)
     }
 
     for datamodule in datamodules.values():
@@ -67,9 +72,9 @@ def main(cfg: DictConfig) -> None:
         idx: Agent(
             id=idx,
             pilots=datamodule.train_data.z_rx,
-            antennas_receiver=cfg.antennas_receiver,
+            antennas_receiver=cfg.communication_channel.antennas_receiver,
             channel_matrix=channel_matrixes[idx],
-            snr=cfg.snr,
+            snr=cfg.communication_channel.snr,
             device=cfg.device,
         )
         for idx, datamodule in tqdm(
@@ -81,9 +86,9 @@ def main(cfg: DictConfig) -> None:
     transmitter_dim: int = datamodules[0].input_size
     base_station: BaseStation = BaseStation(
         dim=transmitter_dim,
-        antennas_transmitter=cfg.antennas_transmitter,
-        rho=cfg.rho,
-        px_cost=cfg.px_cost,
+        antennas_transmitter=cfg.communication_channel.antennas_transmitter,
+        rho=cfg.base_station.rho,
+        px_cost=cfg.base_station.px_cost,
         device=cfg.device,
     )
 
@@ -94,7 +99,7 @@ def main(cfg: DictConfig) -> None:
             idx=agent_id,
             pilots=datamodules[agent_id].train_data.z_tx,
             channel_matrix=channel_matrixes[agent_id]
-            if cfg.channel_aware
+            if cfg.base_station.channel_aware
             else None,
         )
 

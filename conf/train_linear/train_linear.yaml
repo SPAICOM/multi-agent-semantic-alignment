@@ -2,17 +2,23 @@ defaults:
   - _self_
 
 seed: 42
+device: cpu
 iterations: 20
 dataset: cifar10
-antennas_transmitter: 4
-antennas_receiver: 4
-base_station_model: vit_tiny_patch16_224
-agents_models:
-  - vit_small_patch16_224
-  - vit_small_patch32_224
-  - vit_base_patch16_224
-channel_aware: true
-rho: 1e2
-px_cost: 1.0
-snr: 20.0
-device: cpu
+
+communication_channel:
+  snr: 20.0
+  antennas_receiver: 4
+  antennas_transmitter: 4
+  
+base_station:
+  model: vit_tiny_patch16_224
+  rho: 1e2
+  px_cost: 1.0
+  channel_aware: true
+
+agents:
+  models:
+    - vit_small_patch16_224
+    - vit_small_patch32_224
+    - vit_base_patch16_224
