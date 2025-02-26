@@ -33,7 +33,7 @@ def main(cfg: DictConfig) -> None:
     # Setting the seed
     seed_everything(cfg.seed, workers=True)
 
-    # Channel Initialization
+    # Channels Initialization
     channel_matrixes: dict[int : torch.Tensor] = {
         idx: complex_gaussian_matrix(
             0, 1, (cfg.antennas_receiver, cfg.antennas_transmitter)
@@ -76,7 +76,6 @@ def main(cfg: DictConfig) -> None:
     base_station: BaseStation = BaseStation(
         dim=transmitter_dim,
         antennas_transmitter=cfg.antennas_transmitter,
-        # channel_matrixex=channel_matrixex if cfg.channel_aware else None,
         rho=cfg.rho,
         px_cost=cfg.px_cost,
         device=cfg.device,
@@ -88,7 +87,9 @@ def main(cfg: DictConfig) -> None:
         base_station.handshake_step(
             idx=agent_id,
             pilots=datamodules[agent_id].train_data.z_tx,
-            channel_matrix=channel_matrixes[agent_id],
+            channel_matrix=channel_matrixes[agent_id]
+            if cfg.channel_aware
+            else None,
         )
 
     # Base Station - Agent alignment

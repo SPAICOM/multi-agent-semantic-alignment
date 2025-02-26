@@ -142,6 +142,8 @@ class BaseStation:
                 The id of the agent.
             pilots : torch.Tensor
                 The semantic pilots for the agent.
+            channel_matrix : torch.Tensor
+                The channel matrix of the communication.
             c : int
                 The handshake cost in terms of messages. Default 1.
 
@@ -161,7 +163,10 @@ class BaseStation:
         self.agents_id.add(idx)
 
         # Add channel matrix
-        self.channel_matrixes[idx] = channel_matrix.to(self.device)
+        if channel_matrix is None:
+            self.channel_matrixes[idx] = channel_matrix
+        else:
+            self.channel_matrixes[idx] = channel_matrix.to(self.device)
 
         # Compress the pilots
         compressed_pilots = complex_compressed_tensor(
@@ -511,12 +516,13 @@ def main() -> None:
     base_station = BaseStation(
         dim=tx_dim,
         antennas_transmitter=antennas_transmitter,
-        channel_matrix=channel_matrix,
     )
 
     # Perform Handshaking
     for agent_id in agents:
-        base_station.handshake_step(idx=agent_id, pilots=tx_pilots)
+        base_station.handshake_step(
+            idx=agent_id, pilots=tx_pilots, channel_matrix=channel_matrix
+        )
 
     # Base Station - Agent alignment
     for i in range(iterations):
@@ -527,7 +533,8 @@ def main() -> None:
         # (ii) Agents send msg1 and msg2 to the base station
         for idx, agent in agents.items():
             a_msg = agent.step(
-                grp_msgs[idx], channel_awareness=base_station.channel_awareness
+                grp_msgs[idx],
+                channel_awareness=base_station.is_channel_aware(idx),
             )
             base_station.received_from_agent(msg=a_msg)
 
