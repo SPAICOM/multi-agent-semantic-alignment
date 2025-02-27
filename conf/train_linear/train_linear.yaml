@@ -6,7 +6,7 @@ device: cpu
 iterations: 20
 dataset: cifar10
 
-communication_channel:
+communication:
   snr: 20.0
   antennas_receiver: 4
   antennas_transmitter: 4

@@ -45,8 +45,8 @@ def main(cfg: DictConfig) -> None:
             0,
             1,
             (
-                cfg.communication_channel.antennas_receiver,
-                cfg.communication_channel.antennas_transmitter,
+                cfg.communication.antennas_receiver,
+                cfg.communication.antennas_transmitter,
             ),
         )
         for idx, _ in enumerate(cfg.agents.models)
@@ -72,9 +72,9 @@ def main(cfg: DictConfig) -> None:
         idx: Agent(
             id=idx,
             pilots=datamodule.train_data.z_rx,
-            antennas_receiver=cfg.communication_channel.antennas_receiver,
+            antennas_receiver=cfg.communication.antennas_receiver,
             channel_matrix=channel_matrixes[idx],
-            snr=cfg.communication_channel.snr,
+            snr=cfg.communication.snr,
             device=cfg.device,
         )
         for idx, datamodule in tqdm(
@@ -86,7 +86,7 @@ def main(cfg: DictConfig) -> None:
     transmitter_dim: int = datamodules[0].input_size
     base_station: BaseStation = BaseStation(
         dim=transmitter_dim,
-        antennas_transmitter=cfg.communication_channel.antennas_transmitter,
+        antennas_transmitter=cfg.communication.antennas_transmitter,
         rho=cfg.base_station.rho,
         px_cost=cfg.base_station.px_cost,
         device=cfg.device,
@@ -120,6 +120,20 @@ def main(cfg: DictConfig) -> None:
 
         # Base Station computes global F, Z, and U steps
         base_station.step()
+        print(base_station.get_trace())
+
+    # ==============================================================================
+    #                     Evaluate over the test set
+    # ==============================================================================
+    for idx, datamodule in datamodules.items():
+        msg = base_station.transmit_to_agent(idx, datamodule.test_data.z_tx.T)
+
+        loss = agents[idx].eval(
+            msg.T,
+            datamodule.test_data.z_rx,
+            channel_awareness=base_station.is_channel_aware(idx),
+        )
+        print(loss)
 
     return None
 
