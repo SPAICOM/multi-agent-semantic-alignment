@@ -12,9 +12,10 @@ sys.path.append(str(Path(sys.path[0]).parent))
 if typing.TYPE_CHECKING:
     import torch
 
+import wandb
 import hydra
 from tqdm.auto import tqdm
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import seed_everything
 
 from src.datamodules import DataModule
@@ -36,6 +37,18 @@ from src.linear_models import BaseStation, Agent
 )
 def main(cfg: DictConfig) -> None:
     """The main loop."""
+    # Convert DictConfig to a standard dictionary before passing to wandb
+    wandb_config = OmegaConf.to_container(
+        cfg, resolve=True, throw_on_missing=True
+    )
+
+    # Initialize W&B and log config
+    wandb.init(
+        project=cfg.wandb.project,
+        name=f'{cfg.seed}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
+        config=wandb_config,
+    )
+
     # Setting the seed
     seed_everything(cfg.seed, workers=True)
 
@@ -120,11 +133,12 @@ def main(cfg: DictConfig) -> None:
 
         # Base Station computes global F, Z, and U steps
         base_station.step()
-        print(base_station.get_trace())
+        wandb.log({'F trace': base_station.get_trace(), 'agent_id': idx})
 
     # ==============================================================================
     #                     Evaluate over the test set
     # ==============================================================================
+    eval_losses = {}
     for idx, datamodule in datamodules.items():
         msg = base_station.transmit_to_agent(idx, datamodule.test_data.z_tx.T)
 
@@ -133,8 +147,24 @@ def main(cfg: DictConfig) -> None:
             datamodule.test_data.z_rx,
             channel_awareness=base_station.is_channel_aware(idx),
         )
-        print(loss)
+        eval_losses[idx] = loss
 
+    # Create a WandB Table
+    table = wandb.Table(
+        data=[[model, metric] for model, metric in eval_losses.items()],
+        columns=['Agent', 'Eval MSE'],
+    )
+
+    # Log the bar chart
+    wandb.log(
+        {
+            'Agents Eval Performance': wandb.plot.bar(
+                table, 'Agent', 'Eval MSE', title='Agents Eval Performance'
+            )
+        }
+    )
+
+    wandb.finish()
     return None
 
 

@@ -6,6 +6,9 @@ device: cpu
 iterations: 20
 dataset: cifar10
 
+wandb:
+  project: multi_agent_semantic_alignment__linear_model
+
 communication:
   snr: 20.0
   antennas_receiver: 4
