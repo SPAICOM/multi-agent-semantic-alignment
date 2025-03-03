@@ -1,0 +1,28 @@
+defaults:
+  - _self_
+
+seed: 42
+device: cpu
+iterations: 20
+dataset: cifar10
+
+wandb:
+  project: multi_agent_semantic_alignment__linear_model
+
+communication:
+  snr: 20.0
+  antennas_receiver: 4
+  antennas_transmitter: 4
+  
+base_station:
+  model: vit_tiny_patch16_224
+  rho: 1e-1
+  px_cost: 1.0
+  channel_aware: true
+
+agents:
+  privacy: true
+  models:
+    - vit_small_patch16_224
+    - vit_small_patch32_224
+    - vit_base_patch16_224

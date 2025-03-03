@@ -1,4 +1,4 @@
-# multi-agent-semantic-alignment
+# Federated Latent Space Alignment for Multi-user Semantic Communications
 
 ## Dependencies  
 

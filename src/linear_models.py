@@ -7,15 +7,21 @@ from scipy.linalg import solve_sylvester
 if __name__ == '__main__':
     from utils import (
         complex_compressed_tensor,
+        decompress_complex_tensor,
         complex_gaussian_matrix,
         prewhiten,
+        awgn,
         sigma_given_snr,
+        a_inv_times_b,
     )
 else:
     from src.utils import (
         complex_compressed_tensor,
+        decompress_complex_tensor,
         prewhiten,
+        awgn,
         sigma_given_snr,
+        a_inv_times_b,
     )
 
 
@@ -24,6 +30,8 @@ else:
 #                    CLASSES DEFINITION
 #
 # ============================================================
+
+
 class BaseStation:
     """A class simulating a Base Station.
 
@@ -36,22 +44,24 @@ class BaseStation:
             The rho coeficient for the admm method. Default 1e2.
         px_cost : int
             The transmitter power constraint. Default 1.
-        channel_matrix : torch.Tensor
-            The channel matrix. Set to None for the channel unaware case. Default None.
         device : str
             The device on which we run the simulation. Default "cpu".
 
     Attributes:
         self.<param_name> :
             The self. version of the passed parameter.
+        self.L : dict[int, torch.Tensor]
+            The L matrix for prewhitening the messages for a specific agent.
+        self.mean : dict[int, float]
+            The mean needed for prewhitening the messages for a specific agent.
         self.agents_id : set[int]
             The set of agents IDs that are connected to this base station.
         self.agents_pilot : dict[int, torch.Tensor]
             The semantic pilots for the specific agent, already complex compressed and prewhitened.
         self.msgs : dict[str, int]
             The total messages.
-        self.channel_awareness : bool
-            The channel awareness of the base station.
+        self.channel_matrixes : dict[int, torch.Tensor]
+            The channel matrix for each agent.
         self.F : torch.Tensor
             The global F transformation.
         self.Fk : dict[int, torch.Tensor]
@@ -68,27 +78,21 @@ class BaseStation:
         antennas_transmitter: int,
         rho: float = 1e2,
         px_cost: int = 1,
-        channel_matrix: torch.Tensor = None,
         device: str = 'cpu',
     ) -> None:
         self.dim: int = dim
         self.antennas_transmitter: int = antennas_transmitter
         self.rho: float = rho
         self.px_cost: int = px_cost
-        self.channel_matrix: torch.Tensor = channel_matrix
         self.device: str = device
 
         # Attributes Initialization
-        self.L = {}
-        self.mean = {}
-        self.agents_id = set()
-        self.agents_pilots = {}
-        self.msgs = defaultdict(int)
-        self.channel_awareness = self.channel_matrix is not None
-
-        # Set the channl matrix to the device
-        if self.channel_awareness:
-            self.channel_matrix = self.channel_matrix.to(device)
+        self.L: dict[int, torch.Tensor] = {}
+        self.mean: dict[int, float] = {}
+        self.agents_id: set[int] = set()
+        self.agents_pilots: dict[int, torch.Tensor] = {}
+        self.msgs: defaultdict = defaultdict(int)
+        self.channel_matrixes: dict[int, torch.Tensor] = {}
 
         # Initialize Global F at random and locals
         self.F = torch.randn(
@@ -134,6 +138,7 @@ class BaseStation:
         self,
         idx: int,
         pilots: torch.Tensor,
+        channel_matrix: torch.Tensor,
         c: int = 1,
     ) -> None:
         """Handshaking step simulation.
@@ -143,6 +148,8 @@ class BaseStation:
                 The id of the agent.
             pilots : torch.Tensor
                 The semantic pilots for the agent.
+            channel_matrix : torch.Tensor
+                The channel matrix of the communication.
             c : int
                 The handshake cost in terms of messages. Default 1.
 
@@ -161,6 +168,12 @@ class BaseStation:
         # Connect the agent to the base station
         self.agents_id.add(idx)
 
+        # Add channel matrix
+        if channel_matrix is None:
+            self.channel_matrixes[idx] = channel_matrix
+        else:
+            self.channel_matrixes[idx] = channel_matrix.to(self.device)
+
         # Compress the pilots
         compressed_pilots = complex_compressed_tensor(
             pilots, device=self.device
@@ -176,15 +189,55 @@ class BaseStation:
 
         return None
 
+    def get_trace(self) -> float:
+        """Get the trace of the global F matrix.
+
+        Args:
+            None
+
+        Return:
+            float
+                The trace of the global F.
+        """
+        return torch.trace(self.F.H @ self.F).real.item()
+
+    def __compression_and_prewhitening(
+        self,
+        msg: torch.Tensor,
+        idx: int,
+    ) -> torch.Tensor:
+        """A private module used to complex compress and prewhite a message to transmit.
+
+        Args:
+            msg : torch.Tensor
+                The message to compress and prewhite.
+            idx: int
+                The idx of the agent the base line is interested to transmit to.
+
+        Returns:
+            msg : torch.Tensor
+                The message compressed and prewhitened.
+        """
+        # Complex compression
+        msg = complex_compressed_tensor(msg, device=self.device)
+
+        # Prewhitening step
+        msg = a_inv_times_b(self.L[idx], msg - self.mean[idx])
+        return msg
+
     def transmit_to_agent(
         self,
         idx: int,
+        msg: torch.Tensor,
+        alignment: bool = False,
     ) -> list[torch.Tensor]:
         """Transmit to agent i its respective FX or HFX.
 
         Args:
             idx : int
                 The idx of the specific agent.
+            msg : torch.Tensor
+                A message to send to an agent.
 
         Returns:
             msg : torch.Tensor
@@ -194,11 +247,15 @@ class BaseStation:
             'The passed idx is not in the connected agents.'
         )
 
-        # Create a message for an agent
-        if self.channel_awareness:
-            msg = self.channel_matrix @ self.F @ self.agents_pilots[idx]
-        else:
-            msg = self.F @ self.agents_pilots[idx]
+        if not alignment:
+            msg = self.__compression_and_prewhitening(msg, idx)
+
+        # Encode the message
+        msg = self.F @ msg
+
+        # Transmit over the channel
+        if self.is_channel_aware(idx):
+            msg = self.channel_matrixes[idx] @ msg
 
         # Updating the number of trasmitting messages
         self.msgs['transmitting'] += 1
@@ -208,13 +265,18 @@ class BaseStation:
     def group_cast(self) -> dict[int, torch.Tensor]:
         """Send a message to the whole group.
 
+        Args:
+            None
+
         Returns:
             grp_msgs : dict[int, torch.Tensor]
                 A collection of messages to the whole agent group.
         """
         grp_msgs = {}
         for idx in self.agents_id:
-            grp_msgs[idx] = self.transmit_to_agent(idx)
+            grp_msgs[idx] = self.transmit_to_agent(
+                idx, self.agents_pilots[idx], alignment=True
+            )
 
         return grp_msgs
 
@@ -261,7 +323,17 @@ class BaseStation:
         Return:
             None
         """
+        # Check if all agents did transmit their message
+        assert len(self.Fk) == len(self.agents_id), (
+            f'The following agents did not communicate with the base station:\n\t{self.agents_id - set(self.Fk.keys())}'
+        )
+
+        # Performe aggregation of the F
         self.F = torch.stack(list(self.Fk.values()), dim=0).mean(dim=0)
+
+        # Clean local F
+        self.Fk = {}
+
         return None
 
     def __Z_step(self) -> None:
@@ -295,6 +367,22 @@ class BaseStation:
         """
         self.U += self.F - self.Z
         return None
+
+    def is_channel_aware(
+        self,
+        idx: int,
+    ) -> bool:
+        """Check if the communication between the base station and agent idx is channel aware or not.
+
+        Args:
+            idx : int
+                The index of the agent.
+
+        Returns:
+            bool
+                If the base station for this communication is channel aware or not.
+        """
+        return self.channel_matrixes[idx] is not None
 
     def received_from_agent(self, msg: dict[int | str, torch.Tensor]) -> None:
         """Procedure when the base line receives a message from an agent.
@@ -338,6 +426,8 @@ class Agent:
             The channel matrix.
         snr : float
             The Signal to Noise Ratio of the channel. Default 20.0 dB.
+        privacy : bool
+            If the agent performs the privatization of the pilots or not. Default True.
         device : str
             The device on which we run the simulation. Default "cpu".
 
@@ -348,6 +438,8 @@ class Agent:
             The number of semantic pilots.
         self.pilot_dim : int
             The dimentionality of the semantic pilots.
+        self.sigma : int
+            The sigma of the additive white gaussian noise.
         self.G:
             The personal G transformation.
     """
@@ -359,28 +451,65 @@ class Agent:
         antennas_receiver: int,
         channel_matrix: torch.Tensor,
         snr: float = 20.0,
+        privacy: bool = True,
         device: str = 'cpu',
     ) -> None:
         self.id = id
-        self.pilots, self.L, self.mean = prewhiten(
-            complex_compressed_tensor(pilots.T, device=device), device=device
-        )
         self.antennas_receiver: int = antennas_receiver
         self.channel_matrix: torch.Tensor = channel_matrix.to(device)
-        self.snr = snr
+        self.snr: float = snr
+        self.privacy: bool = privacy
         self.device: str = device
 
         assert self.channel_matrix.shape[0] == self.antennas_receiver, (
             'The number of rows of the channel matrix must be equal to the given number of receiver antennas.'
         )
 
+        if self.privacy:
+            self.pilots, self.L, self.mean = prewhiten(
+                complex_compressed_tensor(pilots.T, device=device),
+                device=device,
+            )
+        else:
+            self.pilots = complex_compressed_tensor(pilots.T, device=device)
+            self.L = torch.eye(self.pilots.shape[0], dtype=self.pilots.dtype)
+            self.mean = 0
+
         # Set Variables
         self.pilot_dim, self.n_pilots = self.pilots.shape
+
+        if self.snr:
+            self.sigma = sigma_given_snr(
+                self.snr, torch.ones(1) / math.sqrt(self.antennas_receiver)
+            )
+        else:
+            self.sigma = 0
 
         # Initialize G
         self.G = None
 
         return None
+
+    def __dewhitening_and_decompression(
+        self,
+        msg: torch.Tensor,
+    ) -> torch.Tensor:
+        """A private module to handle both prewhitening removal and decompression of a message.
+
+        Args:
+            msg : torch.Tensor
+                The message to clean and decompress.
+
+        Returns:
+            msg : torch.Tensor
+                The final cleaned message.
+        """
+        # Remove whitening
+        msg = self.L @ msg + self.mean
+
+        # Decompress
+        msg = decompress_complex_tensor(msg, device=self.device)
+        return msg
 
     def __G_step(
         self,
@@ -396,12 +525,6 @@ class Agent:
         Returns:
             None
         """
-        sigma = 0
-        if self.snr:
-            sigma = sigma_given_snr(
-                self.snr, torch.ones(1) / math.sqrt(self.antennas_receiver)
-            )
-
         if not channel_awareness:
             received = self.channel_matrix @ received
 
@@ -409,7 +532,7 @@ class Agent:
             self.pilots
             @ received.H
             @ torch.linalg.inv(
-                received @ received.H + self.n_pilots * sigma * (1 + 1j)
+                received @ received.H + self.n_pilots * self.sigma * (1 + 1j)
             )
         ).to(self.device)
         return None
@@ -439,6 +562,74 @@ class Agent:
         msg = {'id': self.id, 'msg1': A.H @ A, 'msg2': A.H @ self.pilots}
 
         return msg
+
+    def decode(
+        self,
+        msg: torch.Tensor,
+        channel_awareness: bool,
+    ) -> torch.Tensor:
+        """Decode the incoming message from the base station.
+
+        Args:
+            msg : torch.Tensor
+                The incoming message from the base station.
+            channel_awareness : bool
+                The awareness of the base station about the channel state.
+
+        Returns:
+            msg : torch.Tensor
+                The decoded message.
+        """
+        msg = msg.T
+
+        # Pass through the channel if base station was not aware
+        if not channel_awareness:
+            msg = self.channel_matrix @ msg
+
+        # Additive White Gaussian Noise
+        if self.snr:
+            w = awgn(
+                sigma=self.sigma,
+                size=msg.shape,
+                device=self.device,
+            )
+            msg += w
+
+        # Decode the message
+        msg = self.G @ msg
+
+        # Clean the message
+        msg = self.__dewhitening_and_decompression(msg)
+        return msg.T
+
+    def eval(
+        self,
+        input: torch.Tensor,
+        output: torch.Tensor,
+        channel_awareness: bool,
+    ) -> float:
+        """Eval an input given an expected output.
+
+        Args:
+            input : torch.Tensor
+                The input tensor.
+            output : torch.Tensor
+                The output tensor.
+            channel_awareness : bool
+                The awareness of the base station about the channel state.
+
+        Returns:
+            float
+                The mse loss.
+        """
+        assert self.G is not None, (
+            'You have to first align the agent with the base station.'
+        )
+
+        decoded = self.decode(input, channel_awareness=channel_awareness)
+        return torch.nn.functional.mse_loss(
+            decoded, output, reduction='mean'
+        ).item()
 
 
 # ============================================================
@@ -483,12 +674,13 @@ def main() -> None:
     base_station = BaseStation(
         dim=tx_dim,
         antennas_transmitter=antennas_transmitter,
-        channel_matrix=channel_matrix,
     )
 
     # Perform Handshaking
     for agent_id in agents:
-        base_station.handshake_step(idx=agent_id, pilots=tx_pilots)
+        base_station.handshake_step(
+            idx=agent_id, pilots=tx_pilots, channel_matrix=channel_matrix
+        )
 
     # Base Station - Agent alignment
     for i in range(iterations):
@@ -499,7 +691,8 @@ def main() -> None:
         # (ii) Agents send msg1 and msg2 to the base station
         for idx, agent in agents.items():
             a_msg = agent.step(
-                grp_msgs[idx], channel_awareness=base_station.channel_awareness
+                grp_msgs[idx],
+                channel_awareness=base_station.is_channel_aware(idx),
             )
             base_station.received_from_agent(msg=a_msg)
 
