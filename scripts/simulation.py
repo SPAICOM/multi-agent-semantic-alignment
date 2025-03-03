@@ -88,6 +88,7 @@ def main(cfg: DictConfig) -> None:
             antennas_receiver=cfg.communication.antennas_receiver,
             channel_matrix=channel_matrixes[idx],
             snr=cfg.communication.snr,
+            privacy=cfg.agents.privacy,
             device=cfg.device,
         )
         for idx, datamodule in tqdm(

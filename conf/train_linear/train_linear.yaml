@@ -16,11 +16,12 @@ communication:
   
 base_station:
   model: vit_tiny_patch16_224
-  rho: 1e2
+  rho: 1e-1
   px_cost: 1.0
   channel_aware: true
 
 agents:
+  privacy: true
   models:
     - vit_small_patch16_224
     - vit_small_patch32_224

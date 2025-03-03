@@ -426,6 +426,8 @@ class Agent:
             The channel matrix.
         snr : float
             The Signal to Noise Ratio of the channel. Default 20.0 dB.
+        privacy : bool
+            If the agent performs the privatization of the pilots or not. Default True.
         device : str
             The device on which we run the simulation. Default "cpu".
 
@@ -449,20 +451,29 @@ class Agent:
         antennas_receiver: int,
         channel_matrix: torch.Tensor,
         snr: float = 20.0,
+        privacy: bool = True,
         device: str = 'cpu',
     ) -> None:
         self.id = id
-        self.pilots, self.L, self.mean = prewhiten(
-            complex_compressed_tensor(pilots.T, device=device), device=device
-        )
         self.antennas_receiver: int = antennas_receiver
         self.channel_matrix: torch.Tensor = channel_matrix.to(device)
-        self.snr = snr
+        self.snr: float = snr
+        self.privacy: bool = privacy
         self.device: str = device
 
         assert self.channel_matrix.shape[0] == self.antennas_receiver, (
             'The number of rows of the channel matrix must be equal to the given number of receiver antennas.'
         )
+
+        if self.privacy:
+            self.pilots, self.L, self.mean = prewhiten(
+                complex_compressed_tensor(pilots.T, device=device),
+                device=device,
+            )
+        else:
+            self.pilots = complex_compressed_tensor(pilots.T, device=device)
+            self.L = torch.eye(self.pilots.shape[0], dtype=self.pilots.dtype)
+            self.mean = 0
 
         # Set Variables
         self.pilot_dim, self.n_pilots = self.pilots.shape
@@ -480,7 +491,8 @@ class Agent:
         return None
 
     def __dewhitening_and_decompression(
-        self, msg: torch.Tensor
+        self,
+        msg: torch.Tensor,
     ) -> torch.Tensor:
         """A private module to handle both prewhitening removal and decompression of a message.
 
