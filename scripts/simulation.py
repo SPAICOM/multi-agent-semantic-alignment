@@ -134,7 +134,27 @@ def main(cfg: DictConfig) -> None:
 
         # Base Station computes global F, Z, and U steps
         base_station.step()
-        wandb.log({'F trace': base_station.get_trace(), 'agent_id': idx})
+
+        # ===========================================================================
+        #                 Calculating Metrics over Val Dataset
+        # ===========================================================================
+        # Logging the trace of F during alignment
+        wandb.log({'F trace': base_station.get_trace()})
+
+        losses = {}
+        for idx, datamodule in datamodules.items():
+            msg = base_station.transmit_to_agent(
+                idx, datamodule.val_data.z_tx.T
+            )
+
+            loss = agents[idx].eval(
+                msg.T,
+                datamodule.val_data.z_rx,
+                channel_awareness=base_station.is_channel_aware(idx),
+            )
+            losses[f'Val - MSE loss Agent-{idx}'] = loss
+
+        wandb.log(losses)
 
     # ==============================================================================
     #                     Evaluate over the test set
@@ -152,15 +172,18 @@ def main(cfg: DictConfig) -> None:
 
     # Create a WandB Table
     table = wandb.Table(
-        data=[[model, metric] for model, metric in eval_losses.items()],
-        columns=['Agent', 'Eval MSE'],
+        data=[[idx, metric] for idx, metric in eval_losses.items()],
+        columns=['Agent', 'Test - MSE loss'],
     )
 
     # Log the bar chart
     wandb.log(
         {
-            'Agents Eval Performance': wandb.plot.bar(
-                table, 'Agent', 'Eval MSE', title='Agents Eval Performance'
+            'Agents Test Performance': wandb.plot.bar(
+                table,
+                'Agent',
+                'Test - MSE loss',
+                title='Agents Test Performance',
             )
         }
     )
