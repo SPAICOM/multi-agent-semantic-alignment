@@ -424,6 +424,8 @@ class Agent:
             The number of antennas at receiver side.
         channel_matrix : torch.Tensor
             The channel matrix.
+        model_name : str
+            The name of the encoding model of the agent.
         snr : float
             The Signal to Noise Ratio of the channel. Default 20.0 dB.
         privacy : bool
@@ -450,6 +452,7 @@ class Agent:
         pilots: torch.Tensor,
         antennas_receiver: int,
         channel_matrix: torch.Tensor,
+        model_name: str,
         snr: float = 20.0,
         privacy: bool = True,
         device: str = 'cpu',
@@ -457,6 +460,7 @@ class Agent:
         self.id = id
         self.antennas_receiver: int = antennas_receiver
         self.channel_matrix: torch.Tensor = channel_matrix.to(device)
+        self.model_name: str = model_name
         self.snr: float = snr
         self.privacy: bool = privacy
         self.device: str = device

@@ -88,6 +88,7 @@ def main(cfg: DictConfig) -> None:
             antennas_receiver=cfg.communication.antennas_receiver,
             channel_matrix=channel_matrixes[idx],
             snr=cfg.communication.snr,
+            model_name=datamodule.rx_enc,
             privacy=cfg.agents.privacy,
             device=cfg.device,
         )
@@ -142,6 +143,7 @@ def main(cfg: DictConfig) -> None:
         wandb.log({'F trace': base_station.get_trace()})
 
         losses = {}
+        total_loss = 0
         for idx, datamodule in datamodules.items():
             msg = base_station.transmit_to_agent(
                 idx, datamodule.val_data.z_tx.T
@@ -152,9 +154,15 @@ def main(cfg: DictConfig) -> None:
                 datamodule.val_data.z_rx,
                 channel_awareness=base_station.is_channel_aware(idx),
             )
-            losses[f'Val - MSE loss Agent-{idx}'] = loss
+            losses[
+                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Val)'
+            ] = loss
+            total_loss += loss
 
         wandb.log(losses)
+        wandb.log(
+            {'Average Agents - MSE loss (Val)': total_loss / len(agents)}
+        )
 
     # ==============================================================================
     #                     Evaluate over the test set
@@ -168,12 +176,12 @@ def main(cfg: DictConfig) -> None:
             datamodule.test_data.z_rx,
             channel_awareness=base_station.is_channel_aware(idx),
         )
-        eval_losses[idx] = loss
+        eval_losses[f'Agent-{idx} ({agents[idx].model_name})'] = loss
 
     # Create a WandB Table
     table = wandb.Table(
         data=[[idx, metric] for idx, metric in eval_losses.items()],
-        columns=['Agent', 'Test - MSE loss'],
+        columns=['Agent', 'MSE loss (Test)'],
     )
 
     # Log the bar chart
@@ -182,7 +190,7 @@ def main(cfg: DictConfig) -> None:
             'Agents Test Performance': wandb.plot.bar(
                 table,
                 'Agent',
-                'Test - MSE loss',
+                'MSE loss (Test)',
                 title='Agents Test Performance',
             )
         }
