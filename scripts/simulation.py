@@ -32,11 +32,12 @@ def main() -> None:
     dataset: str = 'cifar10'
     antennas_transmitter: int = 4
     antennas_receiver: int = 4
-    base_station_model: str = 'vit_tiny_patch16_224'
+    base_station_model: str =  "efficientvit_m5.r224_in1k" #'vit_tiny_patch16_224'
     agents_models: list[str] = [
         'vit_small_patch16_224',
         'vit_small_patch32_224',
-        'vit_base_patch16_224',
+        "mobilenetv3_small_075"
+        #'vit_base_patch16_224',
     ]
 
     # Setting the seed
