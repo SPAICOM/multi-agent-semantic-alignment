@@ -45,7 +45,7 @@ def main(cfg: DictConfig) -> None:
     # Initialize W&B and log config
     wandb.init(
         project=cfg.wandb.project,
-        name=f'{cfg.seed}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
+        name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
         config=wandb_config,
     )
 
@@ -85,10 +85,11 @@ def main(cfg: DictConfig) -> None:
         idx: Agent(
             id=idx,
             pilots=datamodule.train_data.z_rx,
+            model_name=datamodule.rx_enc,
             antennas_receiver=cfg.communication.antennas_receiver,
             channel_matrix=channel_matrixes[idx],
+            channel_usage=cfg.communication.channel_usage,
             snr=cfg.communication.snr,
-            model_name=datamodule.rx_enc,
             privacy=cfg.agents.privacy,
             device=cfg.device,
         )
@@ -102,6 +103,7 @@ def main(cfg: DictConfig) -> None:
     base_station: BaseStation = BaseStation(
         dim=transmitter_dim,
         antennas_transmitter=cfg.communication.antennas_transmitter,
+        channel_usage=cfg.communication.channel_usage,
         rho=cfg.base_station.rho,
         px_cost=cfg.base_station.px_cost,
         device=cfg.device,

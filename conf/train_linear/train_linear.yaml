@@ -11,6 +11,7 @@ wandb:
 
 communication:
   snr: 20.0
+  channel_usage: 1
   antennas_receiver: 4
   antennas_transmitter: 4
   
