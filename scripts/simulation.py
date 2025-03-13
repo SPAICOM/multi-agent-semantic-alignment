@@ -28,6 +28,7 @@ def main() -> None:
     """The main loop."""
     # Variables Definition
     seed: int = 42
+    snr = 20.0
     iterations: int = 20
     dataset: str = 'cifar10'
     antennas_transmitter: int = 4
@@ -44,10 +45,17 @@ def main() -> None:
     seed_everything(seed, workers=True)
 
     # Channel Initialization
-    channel_matrix = complex_gaussian_matrix(
-        0, 1, (antennas_receiver, antennas_transmitter)
+    channel_matrixes: dict[int : torch.Tensor] = {
+    idx: complex_gaussian_matrix(
+        0,
+        1,
+        (
+            antennas_receiver,
+            antennas_transmitter,
+        ),
     )
-
+    for idx, _ in enumerate(agents_models)
+}
     # Datamodules Initialization
     datamodules = {
         idx: DataModule(
@@ -65,8 +73,13 @@ def main() -> None:
         idx: Agent(
             id=idx,
             pilots=datamodule.train_data.z_rx,
+            model_name=datamodule.rx_enc,
             antennas_receiver=antennas_receiver,
-            channel_matrix=channel_matrix,
+            channel_matrix=channel_matrixes[idx],
+            channel_usage = 1,
+            snr=snr,
+            privacy= True,
+            device= "cpu"
         )
         for idx, datamodule in datamodules.items()
     }
@@ -76,14 +89,20 @@ def main() -> None:
     base_station = BaseStation(
         dim=transmitter_dim,
         antennas_transmitter=antennas_transmitter,
-        channel_matrix=channel_matrix,
+        channel_usage= 1,
+        rho = 100,
+        px_cost = 1.0,
+        device = "cpu"
     )
     
+    print()
     # Perform Handshaking
     for agent_id in agents:
         base_station.handshake_step(
-            idx=agent_id, pilots=datamodules[agent_id].train_data.z_tx
+            idx=agent_id, pilots=datamodules[agent_id].train_data.z_tx,
+            channel_matrix=channel_matrixes[agent_id]
         )
+    print()
     # Base Station - Agent alignment
     for i in tqdm(range(iterations)):
         # Base Station transmits FX or HFX (depends if Base Station is channel aware or not)
@@ -92,12 +111,44 @@ def main() -> None:
         # (i) Agents performs local G and F steps
         # (ii) Agents send msg1 and msg2 to the base station
         for idx, agent in agents.items():
-            a_msg = agent.step(grp_msgs[idx])
+            a_msg = agent.step(grp_msgs[idx],  channel_awareness=base_station.is_channel_aware(idx))
             base_station.received_from_agent(msg=a_msg)
 
         # Base Station computes global F, Z and U steps
         base_station.step()
-       
+
+        losses = {}
+        total_loss = 0
+        for idx, datamodule in datamodules.items():
+            msg = base_station.transmit_to_agent(
+                idx, datamodule.val_data.z_tx.T
+            )
+
+            loss = agents[idx].eval(
+                msg.T,
+                datamodule.val_data.z_rx,
+                channel_awareness=base_station.is_channel_aware(idx),
+            )
+            losses[
+                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Val)'
+            ] = loss
+            total_loss += loss
+        
+        #print( f"Total Loss : {total_loss / len(agents)}")
+
+    
+    eval_losses = {}
+    for idx, datamodule in datamodules.items():
+        msg = base_station.transmit_to_agent(idx, datamodule.test_data.z_tx.T)
+
+        loss = agents[idx].eval(
+            msg.T,
+            datamodule.test_data.z_rx,
+            channel_awareness=base_station.is_channel_aware(idx),
+        )
+        eval_losses[f'Agent-{idx} ({agents[idx].model_name})'] = loss
+
+
     return None
 
 
