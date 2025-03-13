@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(sys.path[0]).parent))
 
+import wandb
 import hydra
 from omegaconf import OmegaConf
 from pytorch_lightning import Trainer, seed_everything
@@ -46,6 +47,7 @@ def main(cfg) -> None:
     )
 
     # Initialize W&B Logger
+    wandb.login()
     wandb_logger = WandbLogger(
         project=cfg.wandb.project,
         name=f'{cfg.datamodule.rx_enc}_{cfg.seed}',
@@ -98,6 +100,7 @@ def main(cfg) -> None:
     # Testing
     trainer.test(datamodule=datamodule, ckpt_path='best')
 
+    wandb.finish()
     return None
 
 
