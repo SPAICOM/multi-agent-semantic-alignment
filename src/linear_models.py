@@ -40,8 +40,10 @@ class BaseStation:
             The dimentionality of the base station encoding space.
         antennas_transmitter : int
             The number of antennas at transmitter side.
+        channel_usage : int
+            The channel usage of the communication. Default 1.
         rho : float
-            The rho coeficient for the admm method. Default 1e2.
+            The rho coeficient for the admm method. Default 1e-1.
         px_cost : int
             The transmitter power constraint. Default 1.
         device : str
@@ -64,7 +66,7 @@ class BaseStation:
             The channel matrix for each agent.
         self.F : torch.Tensor
             The global F transformation.
-        self.Fk : dict[int, torch.Tensor]
+        self.F_agent : dict[int, torch.Tensor]
             The local F transformation of each agent.
         self.Z : torch.Tensor
             The Z parameter required by ADMM.
@@ -76,12 +78,14 @@ class BaseStation:
         self,
         dim: int,
         antennas_transmitter: int,
-        rho: float = 1e2,
+        channel_usage: int = 1,
+        rho: float = 1e-1,
         px_cost: int = 1,
         device: str = 'cpu',
     ) -> None:
         self.dim: int = dim
         self.antennas_transmitter: int = antennas_transmitter
+        self.channel_usage: int = channel_usage
         self.rho: float = rho
         self.px_cost: int = px_cost
         self.device: str = device
@@ -96,22 +100,17 @@ class BaseStation:
 
         # Initialize Global F at random and locals
         self.F = torch.randn(
-            (self.antennas_transmitter, (self.dim + 1) // 2),
+            (
+                self.antennas_transmitter * self.channel_usage,
+                (self.dim + 1) // 2,
+            ),
             dtype=torch.complex64,
         ).to(self.device)
-        self.Fk = {}
+        self.F_agent = {}
 
         # ADMM variables
-        self.Z = torch.zeros(
-            self.antennas_transmitter,
-            (self.dim + 1) // 2,
-            dtype=torch.complex64,
-        ).to(self.device)
-        self.U = torch.zeros(
-            self.antennas_transmitter,
-            (self.dim + 1) // 2,
-            dtype=torch.complex64,
-        ).to(self.device)
+        self.Z = torch.zeros_like(self.F)
+        self.U = torch.zeros_like(self.F)
 
         return None
 
@@ -172,7 +171,10 @@ class BaseStation:
         if channel_matrix is None:
             self.channel_matrixes[idx] = channel_matrix
         else:
-            self.channel_matrixes[idx] = channel_matrix.to(self.device)
+            self.channel_matrixes[idx] = torch.kron(
+                torch.eye(self.channel_usage, dtype=torch.complex64),
+                channel_matrix,
+            ).to(self.device)
 
         # Compress the pilots
         compressed_pilots = complex_compressed_tensor(
@@ -306,7 +308,7 @@ class BaseStation:
         )
         C = (rho * (self.Z - self.U) + msg2 @ self.agents_pilots[idx].H) @ B
 
-        self.Fk[idx] = torch.tensor(
+        self.F_agent[idx] = torch.tensor(
             solve_sylvester(
                 msg1.cpu().numpy(), (rho * B).cpu().numpy(), C.cpu().numpy()
             )
@@ -324,15 +326,15 @@ class BaseStation:
             None
         """
         # Check if all agents did transmit their message
-        assert len(self.Fk) == len(self.agents_id), (
-            f'The following agents did not communicate with the base station:\n\t{self.agents_id - set(self.Fk.keys())}'
+        assert len(self.F_agent) == len(self.agents_id), (
+            f'The following agents did not communicate with the base station:\n\t{self.agents_id - set(self.F_agent.keys())}'
         )
 
         # Performe aggregation of the F
-        self.F = torch.stack(list(self.Fk.values()), dim=0).mean(dim=0)
+        self.F = torch.stack(list(self.F_agent.values()), dim=0).mean(dim=0)
 
         # Clean local F
-        self.Fk = {}
+        self.F_agent = {}
 
         return None
 
@@ -420,10 +422,14 @@ class Agent:
             The id of the specific agent.
         pilots : torch.Tensor
             The semantic pilots of the agent.
+        model_name : str
+            The name of the encoding model of the agent.
         antennas_receiver : int
             The number of antennas at receiver side.
         channel_matrix : torch.Tensor
             The channel matrix.
+        channel_usage : int
+            The channel usage of the communication. Default 1.
         snr : float
             The Signal to Noise Ratio of the channel. Default 20.0 dB.
         privacy : bool
@@ -448,20 +454,29 @@ class Agent:
         self,
         id: int,
         pilots: torch.Tensor,
+        model_name: str,
         antennas_receiver: int,
         channel_matrix: torch.Tensor,
+        channel_usage: int = 1,
         snr: float = 20.0,
         privacy: bool = True,
         device: str = 'cpu',
     ) -> None:
         self.id = id
         self.antennas_receiver: int = antennas_receiver
-        self.channel_matrix: torch.Tensor = channel_matrix.to(device)
+        self.channel_matrix: torch.Tensor = torch.kron(
+            torch.eye(channel_usage, dtype=torch.complex64), channel_matrix
+        ).to(device)
+        self.channel_usage: int = channel_usage
+        self.model_name: str = model_name
         self.snr: float = snr
         self.privacy: bool = privacy
         self.device: str = device
 
-        assert self.channel_matrix.shape[0] == self.antennas_receiver, (
+        assert (
+            self.channel_matrix.shape[0]
+            == self.antennas_receiver * self.channel_usage
+        ), (
             'The number of rows of the channel matrix must be equal to the given number of receiver antennas.'
         )
 
@@ -482,6 +497,9 @@ class Agent:
             self.sigma = sigma_given_snr(
                 self.snr, torch.ones(1) / math.sqrt(self.antennas_receiver)
             )
+
+            if self.channel_usage > 0:
+                self.sigma /= self.channel_usage
         else:
             self.sigma = 0
 
