@@ -46,6 +46,7 @@ def main(cfg: DictConfig) -> None:
     wandb.init(
         project=cfg.wandb.project,
         name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
+        id=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
         config=wandb_config,
     )
 
