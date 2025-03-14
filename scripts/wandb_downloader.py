@@ -15,7 +15,11 @@ from pathlib import Path
 # ============================================================
 
 
-def find_and_rename_ckpt_files(original_path: str, new_path: str) -> None:
+def find_and_rename_ckpt_files(
+    original_path: str,
+    new_path: str,
+    name: str,
+) -> None:
     """Save the results in a convenient directory structure.
 
     Args:
@@ -23,6 +27,8 @@ def find_and_rename_ckpt_files(original_path: str, new_path: str) -> None:
             The directory where the files are currently saved.
         new_path : str
             The new directory where to save the files.
+        name : str
+            The file name.
 
     Returns:
         None
@@ -36,7 +42,7 @@ def find_and_rename_ckpt_files(original_path: str, new_path: str) -> None:
     # Find all .ckpt files in subdirectories
     ckpt_files = list(original_path.rglob('*.ckpt'))
 
-    new_path = f'{new_path}.ckpt'
+    new_path = new_path / f'{name}.ckpt'
     shutil.move(str(ckpt_files[0]), str(new_path))
     print(f'Moved: {ckpt_files[0]} to {new_path}')
 
@@ -71,8 +77,9 @@ def download_classifier(
         type='model',
     ).download()
     find_and_rename_ckpt_files(
-        'artifacts',
-        f'models/classifiers/{dataset}/{rx_enc}/seed_{seed}/seed_{seed}',
+        original_path='artifacts',
+        new_path=f'models/classifiers/{dataset}/{rx_enc}/',
+        name=seed,
     )
     return None
 
