@@ -50,8 +50,8 @@ def main(cfg) -> None:
     wandb.login()
     wandb_logger = WandbLogger(
         project=cfg.wandb.project,
-        name=f'{cfg.datamodule.rx_enc}_{cfg.seed}',
-        id=f'{cfg.datamodule.rx_enc}_{cfg.seed}',
+        name=f'{cfg.datamodule.rx_enc}_{cfg.seed}_{cfg.datamodule.dataset}',
+        id=f'{cfg.datamodule.rx_enc}_{cfg.seed}_{cfg.datamodule.dataset}',
         log_model='all',
         config=wandb_config,
     )
