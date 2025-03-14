@@ -11,9 +11,10 @@ from zipfile import ZipFile
 # =======================================================
 
 
-def download_data(
+def download_zip_from_gdrive(
     id: str,
     name: str = 'latents',
+    path: str = 'data',
 ) -> None:
     """A method to download a zip file containing all the needed data.
     The method will save the data in the data/<name>/ directory.
@@ -23,12 +24,14 @@ def download_data(
             The gdown id of the zip file.
         name : str
             The name of the subdirectory inside data. Default latents.
+        path: str
+            The path where to download the zip.
 
     Returns:
         None
     """
     CURRENT = Path('.')
-    DATA_DIR = CURRENT / 'data'
+    DATA_DIR = CURRENT / path
     ZIP_PATH = DATA_DIR / f'{name}.zip'
     DIR_PATH = DATA_DIR / f'{name}/'
 
@@ -65,7 +68,7 @@ def main() -> None:
 
     print('Running first test...', end='\t')
     id = dotenv_values()
-    download_data(id=id, name='latents')
+    download_zip_from_gdrive(id=id, path='data', name='latents')
     print('[Passed]')
 
     return None

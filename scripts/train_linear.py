@@ -15,12 +15,34 @@ if typing.TYPE_CHECKING:
 import wandb
 import hydra
 from tqdm.auto import tqdm
+from dotenv import dotenv_values
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import seed_everything
 
 from src.datamodules import DataModule
 from src.utils import complex_gaussian_matrix
 from src.linear_models import BaseStation, Agent
+from src.download_utils import download_zip_from_gdrive
+
+
+def setup() -> None:
+    """Setup the repository:
+    - downloading classifiers models.
+    """
+    print()
+    print('Start setup procedure...')
+
+    print()
+    print('Check for the classifiers model availability...')
+    # Download the classifiers if needed
+    # Get from the .env file the zip file Google Drive ID
+    id = dotenv_values()['CLASSIFIERS_ID']
+    download_zip_from_gdrive(id=id, name='classifiers', path='models')
+
+    print()
+    print('All done.')
+    print()
+    return None
 
 
 # =============================================================
@@ -37,6 +59,9 @@ from src.linear_models import BaseStation, Agent
 )
 def main(cfg: DictConfig) -> None:
     """The main loop."""
+    # Setup procedure
+    setup()
+
     # Convert DictConfig to a standard dictionary before passing to wandb
     wandb_config = OmegaConf.to_container(
         cfg, resolve=True, throw_on_missing=True
