@@ -165,11 +165,40 @@ def main(cfg: DictConfig) -> None:
         base_station.step()
 
         # ===========================================================================
-        #                 Calculating Metrics over Val Dataset
+        #                          Logging Metrics
         # ===========================================================================
+
         # Logging the trace of F during alignment
         wandb.log({'F trace': base_station.get_trace()})
 
+        # ===========================================================================
+        #                 Calculating Metrics over Train Dataset
+        # ===========================================================================
+        losses = {}
+        total_loss = 0
+        for idx, datamodule in datamodules.items():
+            msg = base_station.transmit_to_agent(
+                idx, datamodule.train_data.z_tx.T
+            )
+
+            loss = agents[idx].eval(
+                msg.T,
+                datamodule.train_data.z_rx,
+                channel_awareness=base_station.is_channel_aware(idx),
+            )
+            losses[
+                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Train)'
+            ] = loss
+            total_loss += loss
+
+        wandb.log(losses)
+        wandb.log(
+            {'Average Agents - MSE loss (Train)': total_loss / len(agents)}
+        )
+
+        # ===========================================================================
+        #                 Calculating Metrics over Val Dataset
+        # ===========================================================================
         losses = {}
         total_loss = 0
         for idx, datamodule in datamodules.items():
