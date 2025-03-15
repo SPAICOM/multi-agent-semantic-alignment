@@ -17,17 +17,25 @@ import hydra
 from tqdm.auto import tqdm
 from dotenv import dotenv_values
 from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning import seed_everything
+from pytorch_lightning import seed_everything, Trainer
+from torch.utils.data import TensorDataset, DataLoader
 
-from src.datamodules import DataModule
+from src.neural_models import Classifier
 from src.utils import complex_gaussian_matrix
 from src.linear_models import BaseStation, Agent
 from src.download_utils import download_zip_from_gdrive
+from src.datamodules import DataModule, DataModuleClassifier
 
 
-def setup() -> None:
+def setup(
+    models_path: Path,
+) -> None:
     """Setup the repository:
     - downloading classifiers models.
+
+    Args:
+        models_path : Path
+            The path to the models
     """
     print()
     print('Start setup procedure...')
@@ -37,7 +45,7 @@ def setup() -> None:
     # Download the classifiers if needed
     # Get from the .env file the zip file Google Drive ID
     id = dotenv_values()['CLASSIFIERS_ID']
-    download_zip_from_gdrive(id=id, name='classifiers', path='models')
+    download_zip_from_gdrive(id=id, name='classifiers', path=str(models_path))
 
     print()
     print('All done.')
@@ -59,8 +67,19 @@ def setup() -> None:
 )
 def main(cfg: DictConfig) -> None:
     """The main loop."""
+    # Define some usefull paths
+    CURRENT: Path = Path('.')
+    MODEL_PATH: Path = CURRENT / 'models'
+
+    # Define some variables
+    trainer: Trainer = Trainer(
+        inference_mode=True,
+        enable_progress_bar=False,
+        logger=False,
+    )
+
     # Setup procedure
-    setup()
+    setup(models_path=MODEL_PATH)
 
     # Convert DictConfig to a standard dictionary before passing to wandb
     wandb_config = OmegaConf.to_container(
@@ -94,9 +113,10 @@ def main(cfg: DictConfig) -> None:
     # Datamodules Initialization
     datamodules: dict[int, DataModule] = {
         idx: DataModule(
-            dataset=cfg.dataset,
+            dataset=cfg.datamodule.dataset,
             tx_enc=cfg.base_station.model,
             rx_enc=agent_model,
+            batch_size=cfg.datamodule.batch_size,
         )
         for idx, agent_model in enumerate(cfg.agents.models)
     }
@@ -123,6 +143,29 @@ def main(cfg: DictConfig) -> None:
             datamodules.items(), desc='Agents Initialization'
         )
     }
+
+    # Classifiers Initialization
+    classifiers: dict[int, Classifier] = {}
+    print()
+    for agent_id in tqdm(agents, desc='Initialize Classifiers'):
+        # Define the path towards the classifier
+        clf_path: Path = (
+            MODEL_PATH
+            / f'classifiers/{cfg.datamodule.dataset}/{agents[agent_id].model_name}/seed_{cfg.seed}.ckpt'
+        )
+
+        # Load the classifier model
+        classifiers[agent_id] = Classifier.load_from_checkpoint(clf_path)
+        classifiers[agent_id].eval()
+
+        # Get and setup the classifier datamodule
+        clf_datamodule = DataModuleClassifier(
+            dataset=cfg.datamodule.dataset,
+            rx_enc=agents[agent_id].model_name,
+            batch_size=cfg.datamodule.batch_size,
+        )
+        clf_datamodule.prepare_data()
+        clf_datamodule.setup()
 
     # Base Station Initialization
     transmitter_dim: int = datamodules[0].input_size
@@ -155,7 +198,7 @@ def main(cfg: DictConfig) -> None:
         # (i) Agents perform local G and F steps
         # (ii) Agents send msg1 and msg2 to the base station
         for idx, agent in agents.items():
-            a_msg = agent.step(
+            a_msg: torch.Tensor = agent.step(
                 grp_msgs[idx],
                 channel_awareness=base_station.is_channel_aware(idx),
             )
@@ -174,14 +217,14 @@ def main(cfg: DictConfig) -> None:
         # ===========================================================================
         #                 Calculating Metrics over Train Dataset
         # ===========================================================================
-        losses = {}
-        total_loss = 0
+        losses: dict[int, float] = {}
+        total_loss: float = 0
         for idx, datamodule in datamodules.items():
-            msg = base_station.transmit_to_agent(
+            msg: torch.Tensor = base_station.transmit_to_agent(
                 idx, datamodule.train_data.z_tx.T
             )
 
-            loss = agents[idx].eval(
+            loss: float = agents[idx].eval(
                 msg.T,
                 datamodule.train_data.z_rx,
                 channel_awareness=base_station.is_channel_aware(idx),
@@ -199,14 +242,14 @@ def main(cfg: DictConfig) -> None:
         # ===========================================================================
         #                 Calculating Metrics over Val Dataset
         # ===========================================================================
-        losses = {}
-        total_loss = 0
+        losses: dict[int, float] = {}
+        total_loss: float = 0
         for idx, datamodule in datamodules.items():
-            msg = base_station.transmit_to_agent(
+            msg: torch.Tensor = base_station.transmit_to_agent(
                 idx, datamodule.val_data.z_tx.T
             )
 
-            loss = agents[idx].eval(
+            loss: float = agents[idx].eval(
                 msg.T,
                 datamodule.val_data.z_rx,
                 channel_awareness=base_station.is_channel_aware(idx),
@@ -224,11 +267,32 @@ def main(cfg: DictConfig) -> None:
     # ==============================================================================
     #                     Evaluate over the test set
     # ==============================================================================
-    eval_losses = {}
+    eval_losses: dict[str, float] = {}
+    accuracy: dict[str, float] = {}
+    dataloaders: dict[int, DataLoader] = {}
     for idx, datamodule in datamodules.items():
-        msg = base_station.transmit_to_agent(idx, datamodule.test_data.z_tx.T)
+        # Send the message from the base station
+        msg: torch.Tensor = base_station.transmit_to_agent(
+            idx, datamodule.test_data.z_tx.T
+        )
 
-        loss = agents[idx].eval(
+        # Decode the msg from the base station
+        received: torch.Tensor = agents[idx].decode(
+            msg.T,
+            channel_awareness=base_station.is_channel_aware(idx),
+        )
+
+        # Get accuracy
+        dataloaders[idx] = DataLoader(
+            TensorDataset(received, datamodule.test_data.labels),
+            batch_size=cfg.datamodule.batch_size,
+        )
+        accuracy[f'Agent-{idx} ({agents[idx].model_name})'] = trainer.test(
+            model=classifiers[idx], dataloaders=dataloaders[idx]
+        )[0]['test/acc_epoch']
+
+        # Get alignment loss
+        loss: float = agents[idx].eval(
             msg.T,
             datamodule.test_data.z_rx,
             channel_awareness=base_station.is_channel_aware(idx),
@@ -237,18 +301,35 @@ def main(cfg: DictConfig) -> None:
 
     # Create a WandB Table
     table = wandb.Table(
-        data=[[idx, metric] for idx, metric in eval_losses.items()],
-        columns=['Agent', 'MSE loss (Test)'],
+        data=[
+            [idx, loss, acc]
+            for idx, loss, acc in zip(
+                eval_losses.keys(), eval_losses.values(), accuracy.values()
+            )
+        ],
+        columns=['Agent', 'MSE loss (Test)', 'Task Accuracy (Test)'],
     )
 
     # Log the bar chart
     wandb.log(
         {
-            'Agents Test Performance': wandb.plot.bar(
+            'Agents Test Performance - MSE loss': wandb.plot.bar(
                 table,
                 'Agent',
                 'MSE loss (Test)',
-                title='Agents Test Performance',
+                title='Agents Test Performance - MSE loss',
+            )
+        }
+    )
+
+    # Log the bar chart
+    wandb.log(
+        {
+            'Agents Test Performance - Task Accuracy': wandb.plot.bar(
+                table,
+                'Agent',
+                'Task Accuracy (Test)',
+                title='Agents Test Performance - Task Accuracy',
             )
         }
     )
