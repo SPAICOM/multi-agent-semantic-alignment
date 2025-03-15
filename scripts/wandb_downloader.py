@@ -79,7 +79,7 @@ def download_classifier(
     find_and_rename_ckpt_files(
         original_path='artifacts',
         new_path=f'models/classifiers/{dataset}/{rx_enc}/',
-        name=seed,
+        name=f'seed_{seed}',
     )
     return None
 
