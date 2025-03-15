@@ -1,0 +1,17 @@
+Seed set to 42
+Traceback (most recent call last):
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 308, in <module>
+    main()
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 294, in main
+    Base.equalization(channel_matrixes= channel_matrixes)
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 154, in equalization
+    self.F_step(channel=channel_matrixes)
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 186, in F_step
+    self.find_optimal_lambda()
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 199, in find_optimal_lambda
+    self.lmbd = brentq(self.constraint_function, lambda_min, lambda_max)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\.venv\Lib\site-packages\scipy\optimize\_zeros_py.py", line 798, in brentq
+    r = _zeros._brentq(f, a, b, xtol, rtol, maxiter, args, full_output, disp)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: f(a) and f(b) must have different signs

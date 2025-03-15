@@ -4,10 +4,13 @@ import numpy as np
 from tqdm.auto import tqdm
 from collections import defaultdict
 from scipy.linalg import  lstsq
+from scipy.optimize import brentq
 from dataclasses import dataclass,field
 import pandas as pd
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import random
+import wandb
 
 #To be removed after trials 
 if __name__ == "__main__":
@@ -40,9 +43,25 @@ else:
 #                    BASELINE DEFINITION
 #
 # ============================================================
+# Da sostituire con Hydra 
+config_dict = {
+            "seed": 42,
+            "dataset": 'cifar10',
+            "antennas_transmitter": 192,
+            "antennas_receiver": 192,
+            "base_station_model": "mobilenetv3_small_075",
+            "agents_models": [
+            "levit_128s.fb_dist_in1k",
+            "mobilenetv3_large_100",
+            "vit_base_patch32_clip_224",
+            "vit_small_patch16_224",
+            "vit_small_patch32_224",
+            'vit_base_patch16_224'],
+            "channel_usage": 1}
 
- 
+wandb.init(project="Multi Agent MIMO Semantic Alignment",config= config_dict)
 class LinearBaseline:
+
     def __init__(self, 
                  tx_latents : dict[id:torch.Tensor],
                  rx_latents : dict[id:torch.Tensor], 
@@ -68,7 +87,7 @@ class LinearBaseline:
         self.channel_usage = channel_usage
         self.n = None
         self.power_tx = 1
-        self.lmbd =  torch.tensor(1e-1) #initial lambda value
+        self.lmbd = torch.tensor(1e-2, dtype=torch.float32) #initial lambda value
          #---------------------------------
         self.F = torch.randn( #Nr x Nt
             (self.antennas_transmitter, self.antennas_receiver),
@@ -155,33 +174,39 @@ class LinearBaseline:
         assert self.G_l[idx].shape == self.F.shape, f"Dimensions of G_l are not correct"
         return  None
         
-    def F_step(self, channel: dict[int, torch.Tensor], iter:int =10):
+    def F_step(self, channel: dict[int, torch.Tensor], iter: int = 100):
+        """Updates F using iterative method for λ."""
         c = 1 / (self.n * len(self.rx_latents))
-        for iter in range(iter):
-            A, B = 0, 0 
-            for user in range(len(self.rx_latents)):
-                GH = self.G_l[user] @ channel[user]
-                A += GH.H @ GH @ self.tx_latents[user] @ self.tx_latents[user].H
-                B +=  self.tx_latents[user] @ self.tx_latents[user].H @ GH.H 
-            self.F = torch.linalg.inv( A + (self.lmbd * self.n)* torch.eye(self.antennas_transmitter, dtype= torch.complex64)) @ B
+        A, B = 0, 0 
+        for user in range(len(self.rx_latents)):
+            GH = self.G_l[user] @ channel[user]
+            A += GH.H @ GH @ self.tx_latents[user] @ self.tx_latents[user].H
+            B += self.tx_latents[user] @ self.tx_latents[user].H @ GH.H 
+
+        self.F = torch.linalg.inv(A + (self.lmbd.item() * self.n) * torch.eye(self.antennas_transmitter, dtype=torch.complex64)) @ B
+
+        for _ in range(iter):
+            # 1. Find optimal λ using gradient ascent iterative method
             self.update_lambda()
-        #print(f" Trace:{torch.trace(self.F @ self.F.H).real}, lambda: {self.lmbd.data}")
+            # 2. Update F with new λ
+            self.F = torch.linalg.inv(A + (self.lmbd.item() * self.n) * torch.eye(self.antennas_transmitter, dtype=torch.complex64)) @ B
+            
+        print(f"Trace: {torch.trace(self.F @ self.F.H).real.item()}, Lambda: {self.lmbd.item()}")
         return None
-        
-    def update_lambda(self, lr: float = 1e-1, epsilon: float = 1e-2):
+   
+    def update_lambda(self, lr: float = 1e-2):
         with torch.no_grad():
             constraint_violation = torch.trace(self.F @ self.F.H).real - self.power_tx
             
-            if constraint_violation > epsilon:  
-                # Se la potenza è troppo alta, aumentiamo lambda
+            if constraint_violation > 0:  
+                # Se la potenza è troppo alta ed il vincolo e' violato, aumentiamo lambda
                 self.lmbd.data += lr * constraint_violation  
             
-            elif constraint_violation < -epsilon:  
-                # Se la potenza è troppo bassa, riduciamo lambda ma lo manteniamo positivo per rispettare il vincolo lambda>=0
+            elif constraint_violation < 0:  
+                # per rispettare il vincolo lambda>=0
                 self.lmbd.data = torch.max(
                     torch.tensor(0.0, device=self.device), 
-                    self.lmbd - lr * abs(constraint_violation)
-                )
+                    self.lmbd )
         return None
     
     def evaluate(self, 
@@ -211,8 +236,9 @@ class LinearBaseline:
                  for idx in range(len(self.rx_latents))}
         
         loss = [(torch.mean((y_true[idx] - y_hat[idx])**2)) for idx in range(len(self.rx_latents))]
-        return loss
-    
+
+        return loss, y_hat 
+config = wandb.config  
 # ============================================================
 #
 #                     MAIN DEFINITION
@@ -220,96 +246,62 @@ class LinearBaseline:
 # ============================================================
 def main() -> None:
     """The main loop."""
-    # Variables Definition
-    seed: int = 42
-    iterations: int = 1
-    dataset: str = 'cifar10'
-    antennas_transmitter_list: int = [4, 8, 16, 32, 64, 128, 146, 192]
-    antennas_receiver_list: int =    [4, 8, 16, 32, 64, 128, 146, 192]
-    base_station_model: str =  "mobilenetv3_small_075"
-    agents_models: list[str] = [
-    "levit_128s.fb_dist_in1k",
-    "mobilenetv3_large_100",
-    "vit_base_patch32_clip_224",
-    "vit_small_patch16_224",
-    "vit_small_patch32_224",
-    'vit_base_patch16_224'
-    ]
-    # Setting the seed
-    seed_everything(seed, workers=True)
+    seed_everything(config.seed, workers=True)
     tabl = pd.DataFrame(columns=["compression_factor","Trace","lambda_value","MSE" ])
-    for it, (antennas_receiver, antennas_transmitter) in enumerate(zip(antennas_receiver_list, antennas_transmitter_list)):
-        # Channel Initialization
-        channel_matrixes: dict[int : torch.Tensor] = {
-            idx: complex_gaussian_matrix(
-                0,
-                1,
-                (
-                    antennas_receiver,
-                    antennas_transmitter,
-                ),
-            )
-            for idx, _ in enumerate(agents_models)
-        }
+    # Channel Initialization
+    channel_matrixes: dict[int : torch.Tensor] = {
+        idx: complex_gaussian_matrix(
+            0,
+            1,
+            (
+                config.antennas_receiver,
+                config.antennas_transmitter,
+            ),
+        )
+        for idx, _ in enumerate(config.agents_models)
+    }
+    
+    # Datamodules Initialization
+    datamodules = {
+        idx: DataModule(
+            dataset=config.dataset, tx_enc= config.base_station_model, rx_enc=agent_model
+        )
+        for idx, agent_model in enumerate(config.agents_models)
+    }
+    for datamodule in datamodules.values():
+        datamodule.prepare_data()
+        datamodule.setup()
         
-        # Datamodules Initialization
-        datamodules = {
-            idx: DataModule(
-                dataset=dataset, tx_enc=base_station_model, rx_enc=agent_model
-            )
-            for idx, agent_model in enumerate(agents_models)
-        }
-        for datamodule in datamodules.values():
-            datamodule.prepare_data()
-            datamodule.setup()
-            
-        Base = LinearBaseline(tx_latents=  {id : datamodule.train_data.z_tx 
-                                            for id,datamodule in datamodules.items()},
+    Base = LinearBaseline(tx_latents=  {id : datamodule.train_data.z_tx 
+                                        for id,datamodule in datamodules.items()},
 
-                            rx_latents= {id : datamodule.train_data.z_rx 
-                                            for id,datamodule in datamodules.items()},
-                            tx_size =  datamodules[0].train_data.z_tx.shape,
-                            strategy="FK",
-                            antennas_receiver= antennas_receiver,
-                            antennas_transmitter=antennas_transmitter
-                            )
-        
-        compression_factor = (Base.channel_usage*Base.antennas_transmitter/ (Base.tx_size/2) )
-        #-----------------------------------------------------
-        Base.equalization(channel_matrixes= channel_matrixes)
-        mse = Base.evaluate(channel = channel_matrixes) 
-        #-----------------------------------------------------
-        tabl.loc[it] = [compression_factor, torch.trace(Base.F@Base.F.H).real, Base.lmbd.data, mse]
+                        rx_latents= {id : datamodule.train_data.z_rx 
+                                        for id,datamodule in datamodules.items()},
+                        tx_size =  datamodules[0].train_data.z_tx.shape,
+                        strategy="TK",
+                        antennas_receiver= config.antennas_receiver,
+                        antennas_transmitter=config.antennas_transmitter
+                        )
+    
+    compression_factor = (Base.channel_usage*Base.antennas_transmitter/ (Base.tx_size/2) )
+    #-----------------------------------------------------
+    Base.equalization(channel_matrixes= channel_matrixes)
+
+    # mse: list of mse for each user language;
+    # y_preds: dictionary of {idx:y_hat} where y_hat should be used to the classification task
+    mse, y_preds = Base.evaluate(channel = channel_matrixes) 
+    wandb.log({"mse_list": mse})
+    #-----------------------------------------------------
+    tabl = [compression_factor, torch.trace(Base.F@Base.F.H).real, Base.lmbd.data, mse]
+    wandb.log({"table": tabl})
     print(tabl)
     
-
-    # Extracting data
-    compression_factors = tabl["compression_factor"].tolist()
-    mse_values = tabl["MSE"].tolist()  # Assuming each MSE entry is a list
-
-    # Transpose MSE values to get separate lists per model
-    mse_values_per_model = list(zip(*mse_values))
-
-    # Plot each model's MSE values against compression factor
-    plt.figure(figsize=(10, 6))
-
-    for model_idx, model_name in enumerate(agents_models):
-        plt.plot(compression_factors, mse_values_per_model[model_idx], marker='o', label=model_name)
-
-    # Labels and title
-    plt.xlabel("Compression Factor")
-    plt.ylabel("MSE")
-    plt.title("MSE vs Compression Factor for different languages")
-    plt.legend(title="Models")
-    plt.grid(True)
-
-    # Show plot
-    plt.show()
-            
+       
     return None
 
 if __name__ == '__main__':
     main()
 
+wandb.finish()
 
 

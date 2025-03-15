@@ -1,0 +1,13 @@
+Seed set to 42
+Traceback (most recent call last):
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 295, in <module>
+    main()
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 268, in main
+    Base = LinearBaseline(tx_latents=  {id : datamodule.train_data.z_tx
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 100, in __init__
+    self.prepare_latents()
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 119, in prepare_latents
+    column_norm = {id: tensor.abs().sum(dim=0) for id, tensor in self.tx_latents.items()}
+                      ^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

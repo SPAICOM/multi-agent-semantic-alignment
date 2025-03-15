@@ -1,0 +1,3 @@
+Seed set to 42
+Trace: 0.1750555783510208, Lambda: 0.0
+[1.0, tensor(0.1751), tensor(0.), [tensor(14.0618), tensor(0.2401), tensor(2.3055), tensor(7.7974), tensor(7.0513), tensor(2.1628)]]

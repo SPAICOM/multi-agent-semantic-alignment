@@ -1,0 +1,12 @@
+Seed set to 42
+Traceback (most recent call last):
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 308, in <module>
+    main()
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 294, in main
+    Base.equalization(channel_matrixes= channel_matrixes)
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 154, in equalization
+    self.F_step(channel=channel_matrixes)
+  File "C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\src\baseline.py", line 184, in F_step
+    self.F = torch.linalg.inv( A + (torch.Tensor(self.lmbd) * self.n)* torch.eye(self.antennas_transmitter, dtype= torch.complex64)) @ B
+                                    ^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: new(): data must be a sequence (got float)

@@ -1,0 +1,23 @@
+2025-03-15 13:15:33,254 INFO    MainThread:12116 [wandb_setup.py:_flush():67] Current SDK version is 0.19.8
+2025-03-15 13:15:33,254 INFO    MainThread:12116 [wandb_setup.py:_flush():67] Configure stats pid to 12116
+2025-03-15 13:15:33,254 INFO    MainThread:12116 [wandb_setup.py:_flush():67] Loading settings from C:\Users\GD282157\.config\wandb\settings
+2025-03-15 13:15:33,254 INFO    MainThread:12116 [wandb_setup.py:_flush():67] Loading settings from C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\wandb\settings
+2025-03-15 13:15:33,254 INFO    MainThread:12116 [wandb_setup.py:_flush():67] Loading settings from environment variables
+2025-03-15 13:15:33,254 INFO    MainThread:12116 [wandb_init.py:setup_run_log_directory():647] Logging user logs to C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\wandb\run-20250315_131533-dlc227ma\logs\debug.log
+2025-03-15 13:15:33,261 INFO    MainThread:12116 [wandb_init.py:setup_run_log_directory():648] Logging internal logs to C:\Users\GD282157\Desktop\multi-agent-semantic-alignment\wandb\run-20250315_131533-dlc227ma\logs\debug-internal.log
+2025-03-15 13:15:33,261 INFO    MainThread:12116 [wandb_init.py:init():761] calling init triggers
+2025-03-15 13:15:33,261 INFO    MainThread:12116 [wandb_init.py:init():766] wandb.init called with sweep_config: {}
+config: {'seed': 42, 'dataset': 'cifar10', 'antennas_transmitter': 192, 'antennas_receiver': 192, 'base_station_model': 'mobilenetv3_small_075', 'agents_models': ['levit_128s.fb_dist_in1k', 'mobilenetv3_large_100', 'vit_base_patch32_clip_224', 'vit_small_patch16_224', 'vit_small_patch32_224', 'vit_base_patch16_224'], 'channel_usage': 1, '_wandb': {}}
+2025-03-15 13:15:33,261 INFO    MainThread:12116 [wandb_init.py:init():784] starting backend
+2025-03-15 13:15:33,261 INFO    MainThread:12116 [wandb_init.py:init():788] sending inform_init request
+2025-03-15 13:15:33,348 INFO    MainThread:12116 [backend.py:_multiprocessing_setup():101] multiprocessing start_methods=spawn, using: spawn
+2025-03-15 13:15:33,351 INFO    MainThread:12116 [wandb_init.py:init():798] backend started and connected
+2025-03-15 13:15:33,353 INFO    MainThread:12116 [wandb_init.py:init():891] updated telemetry
+2025-03-15 13:15:33,437 INFO    MainThread:12116 [wandb_init.py:init():915] communicating run to backend with 90.0 second timeout
+2025-03-15 13:15:34,948 INFO    MainThread:12116 [wandb_init.py:init():990] starting run threads in backend
+2025-03-15 13:15:35,080 INFO    MainThread:12116 [wandb_run.py:_console_start():2375] atexit reg
+2025-03-15 13:15:35,080 INFO    MainThread:12116 [wandb_run.py:_redirect():2227] redirect: wrap_raw
+2025-03-15 13:15:35,080 INFO    MainThread:12116 [wandb_run.py:_redirect():2292] Wrapping output streams.
+2025-03-15 13:15:35,080 INFO    MainThread:12116 [wandb_run.py:_redirect():2315] Redirects installed.
+2025-03-15 13:15:35,085 INFO    MainThread:12116 [wandb_init.py:init():1032] run started, returning control to user process
+2025-03-15 13:15:46,086 INFO    MsgRouterThr:12116 [mailbox.py:close():129] Closing mailbox, abandoning 1 handles.
