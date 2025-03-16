@@ -14,6 +14,7 @@ if typing.TYPE_CHECKING:
 
 import wandb
 import hydra
+import polars as pl
 from tqdm.auto import tqdm
 from dotenv import dotenv_values
 from omegaconf import DictConfig, OmegaConf
@@ -70,6 +71,10 @@ def main(cfg: DictConfig) -> None:
     # Define some usefull paths
     CURRENT: Path = Path('.')
     MODEL_PATH: Path = CURRENT / 'models'
+    RESULTS_PATH: Path = CURRENT / 'results'
+
+    # Create results directory
+    RESULTS_PATH.mkdir(exist_ok=True)
 
     # Define some variables
     trainer: Trainer = Trainer(
@@ -170,6 +175,7 @@ def main(cfg: DictConfig) -> None:
     # Base Station Initialization
     transmitter_dim: int = datamodules[0].input_size
     base_station: BaseStation = BaseStation(
+        model=cfg.base_station.model,
         dim=transmitter_dim,
         antennas_transmitter=cfg.communication.antennas_transmitter,
         channel_usage=cfg.communication.channel_usage,
@@ -401,6 +407,28 @@ def main(cfg: DictConfig) -> None:
                 title='Agents Test Performance - Task Accuracy',
             )
         }
+    )
+
+    # Save results
+    pl.DataFrame(
+        {
+            'Dataset': cfg.datamodule.dataset,
+            'Seed': cfg.seed,
+            'Channel Usage': cfg.communication.channel_usage,
+            'Antennas Transmitter': cfg.communication.antennas_transmitter,
+            'Antennas Receiver': cfg.communication.antennas_receiver,
+            'SNR': cfg.communication.snr,
+            'Accuracy': list(accuracy.values()),
+            'Agent Model': [
+                agents[int(a.split(' ')[0].split('-')[-1])].model_name
+                for a in accuracy
+            ],
+            'Base Station Model': base_station.model,
+            'Case': 'Linear Semantic Precoding/Decoding',
+        }
+    ).write_parquet(
+        RESULTS_PATH
+        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}.parquet'
     )
 
     wandb.finish()

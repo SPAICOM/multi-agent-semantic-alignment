@@ -36,7 +36,9 @@ class BaseStation:
     """A class simulating a Base Station.
 
     Args:
-        dim: int
+        model : str
+            The model name of the base station.
+        dim : int
             The dimentionality of the base station encoding space.
         antennas_transmitter : int
             The number of antennas at transmitter side.
@@ -76,6 +78,7 @@ class BaseStation:
 
     def __init__(
         self,
+        model: str,
         dim: int,
         antennas_transmitter: int,
         channel_usage: int = 1,
@@ -83,6 +86,7 @@ class BaseStation:
         px_cost: int = 1,
         device: str = 'cpu',
     ) -> None:
+        self.model: str = model
         self.dim: int = dim
         self.antennas_transmitter: int = antennas_transmitter
         self.channel_usage: int = channel_usage

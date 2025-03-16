@@ -6,3 +6,4 @@ wandb/
 
 *.ckpt
 *.zip
+*.parquet
