@@ -260,6 +260,12 @@ def main(cfg: DictConfig) -> None:
                 / len(losses)
             }
         )
+        wandb.log(
+            {
+                'Optimization Objective': sum(list(losses.values()))
+                + base_station.get_dual_loss_regolarized()
+            }
+        )
         if cfg.metrics.train_acc:
             wandb.log(
                 {

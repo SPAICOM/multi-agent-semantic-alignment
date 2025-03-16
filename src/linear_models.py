@@ -203,6 +203,21 @@ class BaseStation:
         """
         return torch.trace(self.F.H @ self.F).real.item()
 
+    def get_dual_loss_regolarized(self) -> float:
+        """Get the regolarized dual loss.
+
+        Args:
+            None
+
+        Returns:
+            float
+                The regolarized dual loss.
+        """
+        n = sum([a.shape[-1] for a in self.agents_pilots.values()])
+        return (
+            self.rho * n * torch.norm(self.F - self.Z + self.U, p='fro') ** 2
+        )
+
     def __compression_and_prewhitening(
         self,
         msg: torch.Tensor,
