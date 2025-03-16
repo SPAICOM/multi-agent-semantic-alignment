@@ -644,6 +644,9 @@ class Agent:
             'You have to first align the agent with the base station.'
         )
 
+        input = input.to(self.device)
+        output = output.to(self.device)
+
         decoded = self.decode(input, channel_awareness=channel_awareness)
         return torch.nn.functional.mse_loss(
             decoded, output, reduction='mean'
