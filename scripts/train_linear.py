@@ -218,56 +218,119 @@ def main(cfg: DictConfig) -> None:
         #                 Calculating Metrics over Train Dataset
         # ===========================================================================
         losses: dict[int, float] = {}
-        total_loss: float = 0
+        accuracy: dict[str, float] = {}
+        dataloaders: dict[int, DataLoader] = {}
         for idx, datamodule in datamodules.items():
+            # Send the message from the base station
             msg: torch.Tensor = base_station.transmit_to_agent(
                 idx, datamodule.train_data.z_tx.T
             )
 
-            loss: float = agents[idx].eval(
+            if cfg.metrics.train_acc:
+                # Decode the msg from the base station
+                received: torch.Tensor = agents[idx].decode(
+                    msg.T,
+                    channel_awareness=base_station.is_channel_aware(idx),
+                )
+
+                # Get accuracy
+                dataloaders[idx] = DataLoader(
+                    TensorDataset(received, datamodule.train_data.labels),
+                    batch_size=cfg.datamodule.batch_size,
+                )
+                accuracy[
+                    f'Agent-{idx} ({agents[idx].model_name}) - Task Accuracy (Train)'
+                ] = trainer.test(
+                    model=classifiers[idx], dataloaders=dataloaders[idx]
+                )[0]['test/acc_epoch']
+
+            # Get alignment loss
+            losses[
+                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Train)'
+            ]: float = agents[idx].eval(
                 msg.T,
                 datamodule.train_data.z_rx,
                 channel_awareness=base_station.is_channel_aware(idx),
             )
-            losses[
-                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Train)'
-            ] = loss
-            total_loss += loss
 
         wandb.log(losses)
         wandb.log(
-            {'Average Agents - MSE loss (Train)': total_loss / len(agents)}
+            {
+                'Average Agents - MSE loss (Train)': sum(list(losses.values()))
+                / len(losses)
+            }
         )
+        if cfg.metrics.train_acc:
+            wandb.log(
+                {
+                    'Average Agents - Task Accuracy (Train)': sum(
+                        list(accuracy.values())
+                    )
+                    / len(accuracy)
+                }
+            )
 
         # ===========================================================================
         #                 Calculating Metrics over Val Dataset
         # ===========================================================================
         losses: dict[int, float] = {}
-        total_loss: float = 0
+        accuracy: dict[str, float] = {}
+        dataloaders: dict[int, DataLoader] = {}
         for idx, datamodule in datamodules.items():
+            # Send the message from the base station
             msg: torch.Tensor = base_station.transmit_to_agent(
                 idx, datamodule.val_data.z_tx.T
             )
 
-            loss: float = agents[idx].eval(
+            if cfg.metrics.val_acc:
+                # Decode the msg from the base station
+                received: torch.Tensor = agents[idx].decode(
+                    msg.T,
+                    channel_awareness=base_station.is_channel_aware(idx),
+                )
+
+                # Get accuracy
+                dataloaders[idx] = DataLoader(
+                    TensorDataset(received, datamodule.val_data.labels),
+                    batch_size=cfg.datamodule.batch_size,
+                )
+                accuracy[
+                    f'Agent-{idx} ({agents[idx].model_name}) - Task Accuracy (Val)'
+                ] = trainer.test(
+                    model=classifiers[idx], dataloaders=dataloaders[idx]
+                )[0]['test/acc_epoch']
+
+            # Get alignment loss
+            losses[
+                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Val)'
+            ]: float = agents[idx].eval(
                 msg.T,
                 datamodule.val_data.z_rx,
                 channel_awareness=base_station.is_channel_aware(idx),
             )
-            losses[
-                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Val)'
-            ] = loss
-            total_loss += loss
 
         wandb.log(losses)
+        wandb.log(accuracy)
         wandb.log(
-            {'Average Agents - MSE loss (Val)': total_loss / len(agents)}
+            {
+                'Average Agents - MSE loss (Val)': sum(list(losses.values()))
+                / len(losses)
+            }
         )
+        if cfg.metrics.val_acc:
+            wandb.log(
+                {
+                    'Average Agents - Task Accuracy (Val)': sum(
+                        list(accuracy.values())
+                    )
+                    / len(accuracy)
+                }
+            )
 
     # ==============================================================================
     #                     Evaluate over the test set
     # ==============================================================================
-    eval_losses: dict[str, float] = {}
+    losses: dict[str, float] = {}
     accuracy: dict[str, float] = {}
     dataloaders: dict[int, DataLoader] = {}
     for idx, datamodule in datamodules.items():
@@ -297,14 +360,14 @@ def main(cfg: DictConfig) -> None:
             datamodule.test_data.z_rx,
             channel_awareness=base_station.is_channel_aware(idx),
         )
-        eval_losses[f'Agent-{idx} ({agents[idx].model_name})'] = loss
+        losses[f'Agent-{idx} ({agents[idx].model_name})'] = loss
 
     # Create a WandB Table
     table = wandb.Table(
         data=[
             [idx, loss, acc]
             for idx, loss, acc in zip(
-                eval_losses.keys(), eval_losses.values(), accuracy.values()
+                losses.keys(), losses.values(), accuracy.values()
             )
         ],
         columns=['Agent', 'MSE loss (Test)', 'Task Accuracy (Test)'],
