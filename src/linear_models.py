@@ -686,14 +686,21 @@ def main() -> None:
 
     # Variables definition
     n: int = 100
+    rho: float = 1e-1
+    snr: float = 20.0
     iterations: int = 1
+    px_cost: float = 1.0
     tx_dim: int = 384
     rx_dim: int = 768
+    channel_usage: int = 2
+    channel_aware: bool = False
     antennas_transmitter: int = 4
     antennas_receiver: int = 4
     channel_matrix: torch.Tensor = complex_gaussian_matrix(
         mean=0, std=1, size=(antennas_receiver, antennas_transmitter)
     )
+    privacy: bool = True
+    device: str = 'cpu'
 
     # Get the semantic pilots
     tx_pilots: torch.Tensor = torch.randn(n, tx_dim)
@@ -705,21 +712,33 @@ def main() -> None:
         0: Agent(
             id=0,
             pilots=rx_pilots,
+            model_name='an incredible name',
             antennas_receiver=antennas_receiver,
             channel_matrix=channel_matrix,
+            channel_usage=channel_usage,
+            snr=snr,
+            privacy=privacy,
+            device=device,
         )
     }
 
     # Base Station Initialization
     base_station = BaseStation(
+        model='an incredible model',
         dim=tx_dim,
         antennas_transmitter=antennas_transmitter,
+        channel_usage=channel_usage,
+        rho=rho,
+        px_cost=px_cost,
+        device=device,
     )
 
     # Perform Handshaking
     for agent_id in agents:
         base_station.handshake_step(
-            idx=agent_id, pilots=tx_pilots, channel_matrix=channel_matrix
+            idx=agent_id,
+            pilots=tx_pilots,
+            channel_matrix=channel_matrix if channel_aware else None,
         )
 
     # Base Station - Agent alignment
