@@ -36,7 +36,9 @@ class BaseStation:
     """A class simulating a Base Station.
 
     Args:
-        dim: int
+        model : str
+            The model name of the base station.
+        dim : int
             The dimentionality of the base station encoding space.
         antennas_transmitter : int
             The number of antennas at transmitter side.
@@ -76,6 +78,7 @@ class BaseStation:
 
     def __init__(
         self,
+        model: str,
         dim: int,
         antennas_transmitter: int,
         channel_usage: int = 1,
@@ -83,6 +86,7 @@ class BaseStation:
         px_cost: int = 1,
         device: str = 'cpu',
     ) -> None:
+        self.model: str = model
         self.dim: int = dim
         self.antennas_transmitter: int = antennas_transmitter
         self.channel_usage: int = channel_usage
@@ -202,6 +206,21 @@ class BaseStation:
                 The trace of the global F.
         """
         return torch.trace(self.F.H @ self.F).real.item()
+
+    def get_dual_loss_regolarized(self) -> float:
+        """Get the regolarized dual loss.
+
+        Args:
+            None
+
+        Returns:
+            float
+                The regolarized dual loss.
+        """
+        n = sum([a.shape[-1] for a in self.agents_pilots.values()])
+        return (
+            self.rho * n * torch.norm(self.F - self.Z + self.U, p='fro') ** 2
+        )
 
     def __compression_and_prewhitening(
         self,
@@ -644,31 +663,13 @@ class Agent:
             'You have to first align the agent with the base station.'
         )
 
+        input = input.to(self.device)
+        output = output.to(self.device)
+
         decoded = self.decode(input, channel_awareness=channel_awareness)
         return torch.nn.functional.mse_loss(
             decoded, output, reduction='mean'
         ).item()
-
-class BaseStation_Baseline(BaseStation):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        #--------------------------------------
-        # define baseline variables at BS side:
-        self.lmbd = torch.tensor(2.0)
-        self.F_base = torch.zeros(
-            (
-                self.antennas_transmitter * self.channel_usage,
-                self.antennas_transmitter * self.channel_usage,
-            ),
-            dtype=torch.complex64,
-        ).to(self.device)
-        #--------------------------------------
-    
-
-    def F_step_baseline(self):
-        return None
-
-
 
 
 # ============================================================
@@ -699,50 +700,45 @@ def main() -> None:
     rx_pilots: torch.Tensor = torch.randn(n, rx_dim)
 
     print('First test...', end='\t')
-#    # Agents Initialization
-#    agents = {
-#        0: Agent(
-#            id=0,
-#            pilots=rx_pilots,
-#            antennas_receiver=antennas_receiver,
-#            channel_matrix=channel_matrix,
-#        )
-#    }
-#
+    # Agents Initialization
+    agents = {
+        0: Agent(
+            id=0,
+            pilots=rx_pilots,
+            antennas_receiver=antennas_receiver,
+            channel_matrix=channel_matrix,
+        )
+    }
+
     # Base Station Initialization
     base_station = BaseStation(
         dim=tx_dim,
         antennas_transmitter=antennas_transmitter,
     )
 
-    base = BaseStation_Baseline(
-        dim=tx_dim,
-        antennas_transmitter=antennas_transmitter,
-    )
-    print(base.F_base)
-    ## Perform Handshaking
-    #for agent_id in agents:
-    #    base_station.handshake_step(
-    #        idx=agent_id, pilots=tx_pilots, channel_matrix=channel_matrix
-    #    )
-#
-    ## Base Station - Agent alignment
-    #for i in range(iterations):
-    #    # Base Station transmits FX or HFX (depends if Base Station is channel aware or not)
-    #    grp_msgs = base_station.group_cast()
-#
-    #    # (i) Agents performs local G and F steps
-    #    # (ii) Agents send msg1 and msg2 to the base station
-    #    for idx, agent in agents.items():
-    #        a_msg = agent.step(
-    #            grp_msgs[idx],
-    #            channel_awareness=base_station.is_channel_aware(idx),
-    #        )
-    #        base_station.received_from_agent(msg=a_msg)
-#
-    #    # Base Station computes global F, Z and U steps
-    #    base_station.step()
-    #print('[Passed]')
+    # Perform Handshaking
+    for agent_id in agents:
+        base_station.handshake_step(
+            idx=agent_id, pilots=tx_pilots, channel_matrix=channel_matrix
+        )
+
+    # Base Station - Agent alignment
+    for i in range(iterations):
+        # Base Station transmits FX or HFX (depends if Base Station is channel aware or not)
+        grp_msgs = base_station.group_cast()
+
+        # (i) Agents performs local G and F steps
+        # (ii) Agents send msg1 and msg2 to the base station
+        for idx, agent in agents.items():
+            a_msg = agent.step(
+                grp_msgs[idx],
+                channel_awareness=base_station.is_channel_aware(idx),
+            )
+            base_station.received_from_agent(msg=a_msg)
+
+        # Base Station computes global F, Z and U steps
+        base_station.step()
+    print('[Passed]')
 
     print()
     return None

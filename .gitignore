@@ -1,2 +1,9 @@
 *__pycache__/
 data/
+outputs/
+multirun/
+wandb/
+
+*.ckpt
+*.zip
+*.parquet
