@@ -30,14 +30,6 @@ import math
 #
 # ================================================================
 
-def pad_tensor(target_tensor, original_tensor):
-    num_missing_rows = target_tensor.shape[0] - original_tensor.shape[0]
-    # Create the zero tensor with the required number of rows
-    zero_tensor = torch.zeros((num_missing_rows, original_tensor.shape[1]))
-
-    # Stack along row dimension (dim=0)
-    stacked_tensor = torch.cat([zero_tensor, original_tensor], dim=0)
-    return 
 
 def complex_compressed_tensor(
     x: torch.Tensor,
@@ -108,7 +100,6 @@ def decompress_complex_tensor(
     x = torch.cat((real_part, imaginary_part), dim=0)
 
     return x.to(device)
-
 
 
 def complex_tensor(
