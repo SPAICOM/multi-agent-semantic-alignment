@@ -3,3 +3,7 @@ data/
 outputs/
 multirun/
 wandb/
+
+*.ckpt
+*.zip
+*.parquet

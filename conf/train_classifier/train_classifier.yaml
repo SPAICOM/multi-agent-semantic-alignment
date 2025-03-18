@@ -1,0 +1,21 @@
+defaults:
+  - _self_
+
+seed: 42
+
+datamodule:
+  dataset: cifar10
+  rx_enc: vit_small_patch16_224
+
+classifier:
+  hidden_dim: 10
+  lr: 1e-2
+    
+trainer:
+  num_sanity_val_steps: 2
+  max_epochs: 100
+  deterministic: True
+  log_every_n_steps: 10
+    
+wandb:
+  project: multi_agent_semantic_alignment__classifier 

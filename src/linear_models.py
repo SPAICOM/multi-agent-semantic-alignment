@@ -36,7 +36,9 @@ class BaseStation:
     """A class simulating a Base Station.
 
     Args:
-        dim: int
+        model : str
+            The model name of the base station.
+        dim : int
             The dimentionality of the base station encoding space.
         antennas_transmitter : int
             The number of antennas at transmitter side.
@@ -76,6 +78,7 @@ class BaseStation:
 
     def __init__(
         self,
+        model: str,
         dim: int,
         antennas_transmitter: int,
         channel_usage: int = 1,
@@ -83,6 +86,7 @@ class BaseStation:
         px_cost: int = 1,
         device: str = 'cpu',
     ) -> None:
+        self.model: str = model
         self.dim: int = dim
         self.antennas_transmitter: int = antennas_transmitter
         self.channel_usage: int = channel_usage
@@ -202,6 +206,21 @@ class BaseStation:
                 The trace of the global F.
         """
         return torch.trace(self.F.H @ self.F).real.item()
+
+    def get_dual_loss_regolarized(self) -> float:
+        """Get the regolarized dual loss.
+
+        Args:
+            None
+
+        Returns:
+            float
+                The regolarized dual loss.
+        """
+        n = sum([a.shape[-1] for a in self.agents_pilots.values()])
+        return (
+            self.rho * n * torch.norm(self.F - self.Z + self.U, p='fro') ** 2
+        )
 
     def __compression_and_prewhitening(
         self,
@@ -643,6 +662,9 @@ class Agent:
         assert self.G is not None, (
             'You have to first align the agent with the base station.'
         )
+
+        input = input.to(self.device)
+        output = output.to(self.device)
 
         decoded = self.decode(input, channel_awareness=channel_awareness)
         return torch.nn.functional.mse_loss(

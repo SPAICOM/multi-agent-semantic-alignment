@@ -4,16 +4,20 @@ defaults:
 seed: 42
 device: cpu
 iterations: 30
-dataset: cifar10
 
-wandb:
-  project: multi_agent_semantic_alignment__linear_model
+datamodule:
+  dataset: cifar10
+  batch_size: 512
+
+metrics:
+  train_acc: false
+  val_acc: false
 
 communication:
   snr: 20.0
-  channel_usage: 1
-  antennas_receiver: 4
-  antennas_transmitter: 4
+  channel_usage: 4
+  antennas_receiver: 10
+  antennas_transmitter: 10
   
 base_station:
   model: vit_tiny_patch16_224
@@ -34,3 +38,6 @@ agents:
     - mobilenetv3_small_100
     - efficientvit_m5.r224_in1k
     - levit_128s.fb_dist_in1k
+
+wandb:
+  project: multi_agent_semantic_alignment__linear_model

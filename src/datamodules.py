@@ -13,11 +13,11 @@ from pytorch_lightning import LightningDataModule
 
 if __name__ == '__main__':
     from download_utils import (
-        download_data,
+        download_zip_from_gdrive,
     )
 else:
     from src.download_utils import (
-        download_data,
+        download_zip_from_gdrive,
     )
 
 # =====================================================
@@ -251,7 +251,7 @@ class DataModule(LightningDataModule):
         ID = dotenv_values()['DATA_ID']
 
         # Download and unzip the data
-        download_data(ID, name='latents')
+        download_zip_from_gdrive(ID, name='latents', path='data')
 
         return None
 
@@ -399,7 +399,7 @@ class DataModuleClassifier(LightningDataModule):
         ID = dotenv_values()['DATA_ID']
 
         # Download and unzip the data
-        download_data(ID, name='latents')
+        download_zip_from_gdrive(ID, name='latents', path='data')
 
         return None
 
