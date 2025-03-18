@@ -1,12 +1,8 @@
 # Add root to the path
 import sys
-import typing
 from pathlib import Path
+
 sys.path.append(str(Path(sys.path[0]).parent))
-if typing.TYPE_CHECKING:
-    import torch
-from tqdm.auto import tqdm
-from omegaconf import DictConfig
 from pytorch_lightning import seed_everything
 from src.datamodules import DataModule
 from src.utils import complex_gaussian_matrix
@@ -58,7 +54,7 @@ def main() -> None:
         )
         for idx, datamodule in datamodules.items()
     }
-    
+
     # Base Station Initialization
     transmitter_dim = datamodules[0].input_size
     base_station = BaseStation(
@@ -66,27 +62,27 @@ def main() -> None:
         antennas_transmitter=antennas_transmitter,
         channel_matrix=channel_matrix,
     )
-    
+
     # Perform Handshaking
     for agent_id in agents:
         base_station.handshake_step(
             idx=agent_id, pilots=datamodules[agent_id].train_data.z_tx
         )
     for agent_id in agents:
-        base_station.disjoint_alignment( agents[agent_id].pilots, agent_id)
-        
-    for _ in range(iterations): 
-        
+        base_station.disjoint_alignment(agents[agent_id].pilots, agent_id)
+
+    for _ in range(iterations):
         for agent_id in agents:
             base_station.G_step_bs(agent_id)
-            
+
         for agent_id in agents:
             base_station.F_step_bs(agent_id)
-        
-        #Update F, Z, U 
+
+        # Update F, Z, U
         base_station.step()
-    
-    return None            
-        
-if __name__ == "__main__":
+
+    return None
+
+
+if __name__ == '__main__':
     main()
