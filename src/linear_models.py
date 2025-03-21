@@ -165,7 +165,7 @@ class BaseStation:
             f'Agent of id {idx} already connected to the base station.'
         )
         assert self.dim == pilots.shape[0], (
-            "The dimention of the semantic pilots doesn't match the dimetion of the base station encodings."
+            "The dimention of the semantic pilots doesn't match the dimention of the base station encodings."
         )
 
         # Connect the agent to the base station
@@ -207,21 +207,6 @@ class BaseStation:
         """
         return torch.trace(self.F.H @ self.F).real.item()
 
-    def get_dual_loss_regolarized(self) -> float:
-        """Get the regolarized dual loss.
-
-        Args:
-            None
-
-        Returns:
-            float
-                The regolarized dual loss.
-        """
-        n = sum([a.shape[-1] for a in self.agents_pilots.values()])
-        return (
-            self.rho * n * torch.norm(self.F - self.Z + self.U, p='fro') ** 2
-        )
-
     def __compression_and_prewhitening(
         self,
         msg: torch.Tensor,
@@ -259,6 +244,8 @@ class BaseStation:
                 The idx of the specific agent.
             msg : torch.Tensor
                 A message to send to an agent.
+            alignment : bool
+                Set to True if the Base Station is in alignment mode. Default False.
 
         Returns:
             msg : torch.Tensor
@@ -303,12 +290,12 @@ class BaseStation:
 
     def __F_local_step(
         self,
-        msg: dict[int | str, torch.Tensor],
+        msg: dict[str, torch.Tensor],
     ) -> None:
         """The local F step for an agent.
 
         Args:
-            msg : dict[int | str, torch.Tensor]
+            msg : dict[str, torch.Tensor]
                 The message from the agent.
 
         Returns:
@@ -346,7 +333,7 @@ class BaseStation:
         """
         # Check if all agents did transmit their message
         assert len(self.F_agent) == len(self.agents_id), (
-            f'The following agents did not communicate with the base station:\n\t{self.agents_id - set(self.F_agent.keys())}'
+            f'The following agents are not registered in the base station:\n\t{self.agents_id - set(self.F_agent.keys())}'
         )
 
         # Performe aggregation of the F
@@ -409,7 +396,7 @@ class BaseStation:
         """Procedure when the base line receives a message from an agent.
 
         Args:
-            msg : dict[int | str, torch.Tensor]
+            msg : dict[str, torch.Tensor]
                 The message from the agent.
 
         Returns:
@@ -558,6 +545,8 @@ class Agent:
         Args:
             received : torch.Tensor
                 The message from the base station.
+            channel_awareness : bool
+                If the baseline is channel aware or not.
 
         Returns:
             None
@@ -578,15 +567,17 @@ class Agent:
         self,
         received: torch.Tensor,
         channel_awareness: bool,
-    ) -> dict[int | str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """The agent step.
 
         Args:
             received : torch.Tensor
                 The message from the base station.
+            channel_awareness : bool
+                If the baseline is channel aware or not.
 
         Returns:
-            msg : dict[int | str, torch.Tensor]
+            msg : dict[str, torch.Tensor]
                 The message to send to the base station.
         """
         received = received.to(self.device)

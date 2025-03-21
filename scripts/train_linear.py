@@ -266,12 +266,6 @@ def main(cfg: DictConfig) -> None:
                 / len(losses)
             }
         )
-        wandb.log(
-            {
-                'Optimization Objective': sum(list(losses.values()))
-                + base_station.get_dual_loss_regolarized()
-            }
-        )
         if cfg.metrics.train_acc:
             wandb.log(
                 {
@@ -425,6 +419,8 @@ def main(cfg: DictConfig) -> None:
             ],
             'Base Station Model': base_station.model,
             'Case': 'Linear Semantic Precoding/Decoding',
+            'Latent Real Dim': base_station.dim,
+            'Latent Complex Dim': (base_station.dim + 1) // 2,
         }
     ).write_parquet(
         RESULTS_PATH
