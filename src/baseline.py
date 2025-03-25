@@ -4,19 +4,21 @@ import numpy as np
 from tqdm.auto import tqdm
 from collections import defaultdict
 from scipy.linalg import  lstsq
-from scipy.optimize import brentq
 from dataclasses import dataclass,field
 import pandas as pd
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import random
 import wandb
+from scipy.linalg import solve_sylvester
+from scipy.optimize import bisect
 
 #To be removed after trials 
 if __name__ == "__main__":
     from datamodules import DataModule
 else:
     from src.datamodules import DataModule
+    
 from pytorch_lightning import seed_everything
 
 
@@ -29,7 +31,7 @@ if __name__ == '__main__':
         awgn, decompress_complex_tensor
     )
 else:
-    from src.utils import (
+    from utils import (
         complex_compressed_tensor,
         prewhiten,
         sigma_given_snr,
@@ -47,17 +49,24 @@ else:
 config_dict = {
             "seed": 42,
             "dataset": 'cifar10',
-            "antennas_transmitter": 192,
-            "antennas_receiver": 192,
-            "base_station_model": "mobilenetv3_small_075",
+            "antennas_transmitter": 4,
+            "antennas_receiver": 4,
+            "base_station_model": "vit_tiny_patch16_224",
             "agents_models": [
-            "levit_128s.fb_dist_in1k",
-            "mobilenetv3_large_100",
-            "vit_base_patch32_clip_224",
-            "vit_small_patch16_224",
-            "vit_small_patch32_224",
-            'vit_base_patch16_224'],
-            "channel_usage": 1}
+                #"vit_tiny_patch16_224",
+                "vit_small_patch16_224",
+                "mobilenetv3_large_100",
+                "rexnet_100",
+                "rexnet_130",
+                "rexnet_150",
+                 "vit_small_patch32_224",
+                 "vit_base_patch16_224",
+                 "vit_base_patch32_clip_224",
+                 "mobilenetv3_large_100",
+                 "mobilenetv3_small_100",
+                 "levit_128s.fb_dist_in1k"],
+            "channel_usage": 1,
+            "strategy": "TK"}
 
 wandb.init(project="Multi Agent MIMO Semantic Alignment",config= config_dict)
 class LinearBaseline:
@@ -87,7 +96,7 @@ class LinearBaseline:
         self.channel_usage = channel_usage
         self.n = None
         self.power_tx = 1
-        self.lmbd = torch.tensor(1e-2, dtype=torch.float32) #initial lambda value
+        self.lmbd = torch.tensor(0, dtype=torch.float32) #initial lambda value
          #---------------------------------
         self.F = torch.randn( #Nr x Nt
             (self.antennas_transmitter, self.antennas_receiver),
@@ -149,10 +158,12 @@ class LinearBaseline:
 
     def equalization(self,
                      channel_matrixes :dict[int:torch.Tensor]=None):
+        kron_channels = {user: torch.kron(torch.eye(self.channel_usage, dtype=torch.complex64), channel_matrixes[user])
+                         for user in range(len(self.rx_latents))}
+        
         for user in range(len(self.rx_latents)):
-            self.G_step(idx=user, channel= channel_matrixes)
-        self.F_step(channel=channel_matrixes)
-        #self.update_lambda()
+            self.G_step(idx=user, channel= kron_channels)
+        self.F_step(channel=kron_channels)
         return None
 
     def G_step(self, 
@@ -167,48 +178,47 @@ class LinearBaseline:
         B = U @ S
 
         if self.snr:
-            self.G_l[idx] = ( torch.kron( torch.eye(self.channel_usage, dtype= torch.complex64), B.H ) @ torch.linalg.inv(B@B.H + (1/self.snr) * torch.view_as_complex(torch.stack((torch.eye(B.shape[0]), torch.eye(B.shape[0])), dim=-1))) ) * torch.linalg.norm(Vt.H)
+            self.G_l[idx] = ( B.H  @ torch.linalg.inv(B@B.H + (1/self.snr) * torch.view_as_complex(torch.stack((torch.eye(B.shape[0]), torch.eye(B.shape[0])), dim=-1))) ) * torch.linalg.norm(Vt.H)
         else:
             self.G_l[idx] = ( torch.linalg.inv(S) @ U.H ) * torch.linalg.norm(Vt.H)
         
         assert self.G_l[idx].shape == self.F.shape, f"Dimensions of G_l are not correct"
         return  None
-        
-    def F_step(self, channel: dict[int, torch.Tensor], iter: int = 100):
+    
+    def F_step(self, channel: dict[int, torch.Tensor]):
         """Updates F using iterative method for λ."""
-        c = 1 / (self.n * len(self.rx_latents))
-        A, B = 0, 0 
+        c = 1 / (self.n * len(self.rx_latents) * self.channel_usage)
+        A, B, C = 0, 0, 0
         for user in range(len(self.rx_latents)):
             GH = self.G_l[user] @ channel[user]
-            A += GH.H @ GH @ self.tx_latents[user] @ self.tx_latents[user].H
-            B += self.tx_latents[user] @ self.tx_latents[user].H @ GH.H 
+            A += GH.H @ GH 
+            B += self.tx_latents[user] @ self.tx_latents[user].H 
+            C += GH.H @ (self.tx_latents[user] @ self.tx_latents[user].H) 
 
-        self.F = torch.linalg.inv(A + (self.lmbd.item() * self.n) * torch.eye(self.antennas_transmitter, dtype=torch.complex64)) @ B
+        w = self.lmbd / c
+        self.F = torch.tensor(
+            solve_sylvester(
+                A.numpy(),
+                (w * torch.linalg.inv(B)).numpy(),
+                (torch.linalg.inv(B) @ C).numpy()
+            )
+        ).to(self.device)
 
-        for _ in range(iter):
-            # 1. Find optimal λ using gradient ascent iterative method
-            self.update_lambda()
-            # 2. Update F with new λ
-            self.F = torch.linalg.inv(A + (self.lmbd.item() * self.n) * torch.eye(self.antennas_transmitter, dtype=torch.complex64)) @ B
-            
-        print(f"Trace: {torch.trace(self.F @ self.F.H).real.item()}, Lambda: {self.lmbd.item()}")
+
         return None
-   
+
     def update_lambda(self, lr: float = 1e-2):
         with torch.no_grad():
-            constraint_violation = torch.trace(self.F @ self.F.H).real - self.power_tx
-            
+            constraint_violation = torch.trace(self.F @ self.F.H).real.item() - self.power_tx
+            print(constraint_violation)
             if constraint_violation > 0:  
-                # Se la potenza è troppo alta ed il vincolo e' violato, aumentiamo lambda
-                self.lmbd.data += lr * constraint_violation  
-            
-            elif constraint_violation < 0:  
-                # per rispettare il vincolo lambda>=0
-                self.lmbd.data = torch.max(
-                    torch.tensor(0.0, device=self.device), 
-                    self.lmbd )
+                # Increase lambda if the constraint is violated (power is too high)
+                self.lmbd += lr * constraint_violation  
+            elif constraint_violation < 0:
+                # Ensure lambda stays non-negative
+                self.lmbd = torch.max(torch.tensor(0.0, device=self.device), self.lmbd)
         return None
-    
+  
     def evaluate(self, 
                  channel:list[torch.Tensor]):
         sigma_ = sigma_given_snr(snr=self.snr, signal=torch.ones(1)/math.sqrt(self.antennas_transmitter)) 
@@ -278,7 +288,7 @@ def main() -> None:
                         rx_latents= {id : datamodule.train_data.z_rx 
                                         for id,datamodule in datamodules.items()},
                         tx_size =  datamodules[0].train_data.z_tx.shape,
-                        strategy="TK",
+                        strategy= config.strategy,
                         antennas_receiver= config.antennas_receiver,
                         antennas_transmitter=config.antennas_transmitter
                         )
@@ -290,18 +300,57 @@ def main() -> None:
     # mse: list of mse for each user language;
     # y_preds: dictionary of {idx:y_hat} where y_hat should be used to the classification task
     mse, y_preds = Base.evaluate(channel = channel_matrixes) 
-    wandb.log({"mse_list": mse})
+    #wandb.log({"mse_list": mse})
     #-----------------------------------------------------
-    tabl = [compression_factor, torch.trace(Base.F@Base.F.H).real, Base.lmbd.data, mse]
-    wandb.log({"table": tabl})
-    print(tabl)
-    
-       
+    #tabl = [compression_factor, torch.trace(Base.F@Base.F.H).real, Base.lmbd.data]
+    losses = pd.DataFrame({'Model': config.agents_models, 'MSE': mse})
+
+    print(losses)
+    #wandb.log({"table": losses})
+    #trace = torch.trace(Base.F@Base.F.H).real.item()-1
+    #def f(lam,trace_val):
+    #   return lam * (trace_val)
+#
+    #lambdas = np.logspace(-10, 1, num=200)
+#
+    ## Compute f(lambda) for each lambda
+    #f_values = f(lambdas, trace)
+#
+    ## Plot the function
+    #plt.figure(figsize=(8, 5))
+    #plt.semilogx(lambdas, f_values, label=r'$f(\lambda) = \lambda\,(\mathrm{trace}(F F^H)-1)$')
+    #plt.xlabel(r'$\lambda$', fontsize=12)
+    #plt.ylabel('f(lambda)', fontsize=12)
+    #plt.title('Plot of $f(\\lambda)$ vs $\\lambda$', fontsize=14)
+    #plt.legend()
+    #plt.grid(True, which="both", ls="--", linewidth=0.5)
+    #plt.show()
+#
+    #lambda_vals = np.logspace(-6, 6, num=200)
+    #trace_vals = []
+#
+    ## Loop over the lambda values
+    #for lam in lambda_vals:
+    #    Base.lmbd = lam  # update the lambda in your instance
+    #    Base.F_step(channel_matrixes)  # update F based on the current lambda
+    #    # Compute trace(F @ F.H). Since F is a torch tensor, use .conj().T for the Hermitian.
+    #    current_trace = torch.trace(Base.F @ Base.F.H).item()
+    #    trace_vals.append(current_trace)
+#
+    ## Plot trace(F @ F.H) versus lambda
+    #plt.figure(figsize=(8, 5))
+    #plt.semilogx(lambda_vals, trace_vals, label=r'$\operatorname{trace}(F F^H)$')
+    #plt.xlabel(r'$\lambda$', fontsize=12)
+    #plt.ylabel(r'$\operatorname{trace}(F F^H)$', fontsize=12)
+    #plt.title('Trace of $F F^H$ vs. $\lambda$', fontsize=14)
+    #plt.legend()
+    #plt.grid(True, which="both", ls="--", linewidth=0.5)
+    #plt.show()
     return None
 
 if __name__ == '__main__':
     main()
 
-wandb.finish()
+#wandb.finish()
 
 

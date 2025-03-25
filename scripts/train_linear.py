@@ -269,7 +269,7 @@ def main(cfg: DictConfig) -> None:
         wandb.log(
             {
                 'Optimization Objective': sum(list(losses.values()))
-                + base_station.get_dual_loss_regolarized()
+                #+ base_station.get_dual_loss_regolarized()
             }
         )
         if cfg.metrics.train_acc:

@@ -165,16 +165,11 @@ if __name__ == "__main__":
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
     dataset_name: str = "cifar10"
     transformer_names = list(
-        {   #'vit_wee_patch16_reg1_gap_256.sbb_in1k',
-             #'efficientvit_m5.r224_in1k',
-             'levit_128s.fb_dist_in1k'
-            #"mobilenetv3_small_100",
-            #"mobilenetv3_large_100",
-            #"mobilenetv3_small_075",
-            #"vit_base_patch32_clip_224",
-            #"rexnet_100",
+        {
+            'rexnet_150',
+            'rexnet_130'
         }
-    )  
+    )
 
 
     CACHE_LATENTS: bool = True
