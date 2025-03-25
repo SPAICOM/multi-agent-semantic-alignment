@@ -23,12 +23,14 @@ from pytorch_lightning import seed_everything
 
 
 if __name__ == '__main__':
+    from datamodules import DataModule
     from utils import (
         complex_compressed_tensor,
         prewhiten,
         sigma_given_snr,
         complex_gaussian_matrix,
-        awgn, decompress_complex_tensor
+        awgn,
+        decompress_complex_tensor,
     )
 else:
     from utils import (
@@ -36,8 +38,8 @@ else:
         prewhiten,
         sigma_given_snr,
         complex_gaussian_matrix,
-        awgn, 
-        decompress_complex_tensor
+        awgn,
+        decompress_complex_tensor,
     )
 
 # ============================================================
@@ -45,7 +47,7 @@ else:
 #                    BASELINE DEFINITION
 #
 # ============================================================
-# Da sostituire con Hydra 
+# Da sostituire con Hydra
 config_dict = {
             "seed": 42,
             "dataset": 'cifar10',
@@ -68,30 +70,32 @@ config_dict = {
             "channel_usage": 1,
             "strategy": "TK"}
 
-wandb.init(project="Multi Agent MIMO Semantic Alignment",config= config_dict)
-class LinearBaseline:
+wandb.init(project='Multi Agent MIMO Semantic Alignment', config=config_dict)
 
-    def __init__(self, 
-                 tx_latents : dict[id:torch.Tensor],
-                 rx_latents : dict[id:torch.Tensor], 
-                 tx_size:int,
-                 antennas_transmitter:int,
-                 antennas_receiver:int,
-                 strategy :str,
-                 device: str = "cpu", 
-                 snr: float =20.0,
-                 dual_var: float = None,
-                 channel_usage:int = 1):
-        """The LinearBaselineOpt class.
-        """
+
+class LinearBaseline:
+    def __init__(
+        self,
+        tx_latents: dict[id : torch.Tensor],
+        rx_latents: dict[id : torch.Tensor],
+        tx_size: int,
+        antennas_transmitter: int,
+        antennas_receiver: int,
+        strategy: str,
+        device: str = 'cpu',
+        snr: float = 20.0,
+        dual_var: float = None,
+        channel_usage: int = 1,
+    ):
+        """The LinearBaselineOpt class."""
         self.device = torch.device(device)
         self.snr = snr
-        self.tx_latents: dict[id:torch.Tensor] = tx_latents
-        self.rx_latents: dict[id:torch.Tensor] = rx_latents
-        self.tx_dim : int = tx_size 
+        self.tx_latents: dict[id : torch.Tensor] = tx_latents
+        self.rx_latents: dict[id : torch.Tensor] = rx_latents
+        self.tx_dim: int = tx_size
         self.strategy = strategy
         self.antennas_transmitter = antennas_transmitter
-        self.antennas_receiver = antennas_receiver #we are in the square case
+        self.antennas_receiver = antennas_receiver  # we are in the square case
         self.L, self.mean = [], []
         self.channel_usage = channel_usage
         self.n = None
@@ -102,59 +106,79 @@ class LinearBaseline:
             (self.antennas_transmitter, self.antennas_receiver),
             dtype=torch.complex64,
         ).to(self.device)
-        self.G_l : dict[int:torch.Tensor] = {idx: torch.zeros_like(self.F)
-                                           for idx in range(len(rx_latents))}
-        self.W = {idx:None 
-                  for idx in range(len(rx_latents))} #alignment matrix 
+        self.G_l: dict[int : torch.Tensor] = {
+            idx: torch.zeros_like(self.F) for idx in range(len(rx_latents))
+        }
+        self.W = {
+            idx: None for idx in range(len(rx_latents))
+        }  # alignment matrix
         self.alignment_matrix()
         self.prepare_latents()
-        
-    def alignment_matrix(self):     
+
+    def alignment_matrix(self):
         with torch.no_grad():
             for idx in range(len(self.rx_latents)):
-                self.W[idx]= torch.linalg.lstsq(self.tx_latents[idx], self.rx_latents[idx]).solution
-                self.tx_latents[idx] =  self.tx_latents[idx] @ self.W[idx]
+                self.W[idx] = torch.linalg.lstsq(
+                    self.tx_latents[idx], self.rx_latents[idx]
+                ).solution
+                self.tx_latents[idx] = self.tx_latents[idx] @ self.W[idx]
         return None
 
     def prepare_latents(self):
-        """ Perform complex conversion and pre-withening.
-            The tx latents space after complex compression have dimension (K*N-tx x n);
-           -Inputs : None, class method
-           - Outputs : None
-        """ 
+        """Perform complex conversion and pre-withening.
+         The tx latents space after complex compression have dimension (K*N-tx x n);
+        -Inputs : None, class method
+        - Outputs : None
+        """
         self.n, self.tx_size = self.tx_latents[0].shape
         if self.strategy == 'FK':
-            self.tx_latents = [self.tx_latents[idx][:, :self.channel_usage * 2 * self.antennas_transmitter] for idx in range(len(self.tx_latents))]
-        if self.strategy == 'TK':  
-           column_norm = {id: tensor.abs().sum(dim=0) for id, tensor in self.tx_latents.items()} 
-          # Select top-k indices from the first tensor
-           first_key = next(iter(column_norm))  # Get first key
-           k = self.channel_usage * 2 * self.antennas_transmitter
-           if column_norm[first_key].numel() < k:
-            raise ValueError(f"Not enough features in column_norm[{first_key}]: {column_norm[first_key].numel()} available, but {k} requested.")
-           _, indices = torch.topk(column_norm[first_key], k)
+            self.tx_latents = [
+                self.tx_latents[idx][
+                    :, : self.channel_usage * 2 * self.antennas_transmitter
+                ]
+                for idx in range(len(self.tx_latents))
+            ]
+        if self.strategy == 'TK':
+            column_norm = {
+                id: tensor.abs().sum(dim=0)
+                for id, tensor in self.tx_latents.items()
+            }
+            # Select top-k indices from the first tensor
+            first_key = next(iter(column_norm))  # Get first key
+            k = self.channel_usage * 2 * self.antennas_transmitter
+            if column_norm[first_key].numel() < k:
+                raise ValueError(
+                    f'Not enough features in column_norm[{first_key}]: {column_norm[first_key].numel()} available, but {k} requested.'
+                )
+            _, indices = torch.topk(column_norm[first_key], k)
             # Apply feature selection while keeping the dictionary structure
-           self.tx_latents = {id: tensor[:, indices] for id, tensor in self.tx_latents.items()}
-            
-        assert self.strategy == 'TK' or self.strategy == 'FK', f"Strategy {self.strategy} is not supported, choose TK or FK"
-        # Compress the rx and tx_pilots latent spaces
-        self.tx_latents = [complex_compressed_tensor(
-            self.tx_latents[i].T, device=self.device
-        ) for i in range(len(self.rx_latents))]
+            self.tx_latents = {
+                id: tensor[:, indices]
+                for id, tensor in self.tx_latents.items()
+            }
 
-        self.rx_latents = [complex_compressed_tensor(
-            self.rx_latents[i].T, device=self.device
-        ) for i in range(len(self.rx_latents))]
+        assert self.strategy == 'TK' or self.strategy == 'FK', (
+            f'Strategy {self.strategy} is not supported, choose TK or FK'
+        )
+        # Compress the rx and tx_pilots latent spaces
+        self.tx_latents = [
+            complex_compressed_tensor(self.tx_latents[i].T, device=self.device)
+            for i in range(len(self.rx_latents))
+        ]
+
+        self.rx_latents = [
+            complex_compressed_tensor(self.rx_latents[i].T, device=self.device)
+            for i in range(len(self.rx_latents))
+        ]
 
         self.tx_latents, self.L, self.mean = zip(
-        *[prewhiten(tensor, device=self.device) for tensor in self.tx_latents])
+            *[
+                prewhiten(tensor, device=self.device)
+                for tensor in self.tx_latents
+            ]
+        )
 
-
-        #print(f"The prepared X has shape (N_TX x n)={self.tx_latents[0].shape}") 
-        #print(f"The number of samples per agent is = {self.n}")       
-        #print(f"The prepared Y has shape (m/2 x n)={self.rx_latents[0].shape}") 
-        #print('--------')                                                
-        return None   
+        return None
 
     def equalization(self,
                      channel_matrixes :dict[int:torch.Tensor]=None):
@@ -166,13 +190,8 @@ class LinearBaseline:
         self.F_step(channel=kron_channels)
         return None
 
-    def G_step(self, 
-               idx:int,
-               channel :dict[int:torch.Tensor]):
-        sigma = 0
-        if self.snr:
-                sigma = sigma_given_snr(self.snr, torch.ones(1)/math.sqrt(self.antennas_transmitter))
-        
+    def G_step(self, idx: int, channel: dict[int : torch.Tensor]):
+        """ """
         U, S, Vt = torch.linalg.svd(channel[idx])
         S = torch.diag(S).to(torch.complex64)
         B = U @ S
@@ -207,6 +226,7 @@ class LinearBaseline:
 
         return None
 
+
     def update_lambda(self, lr: float = 1e-2):
         with torch.no_grad():
             constraint_violation = torch.trace(self.F @ self.F.H).real.item() - self.power_tx
@@ -223,32 +243,61 @@ class LinearBaseline:
                  channel:list[torch.Tensor]):
         sigma_ = sigma_given_snr(snr=self.snr, signal=torch.ones(1)/math.sqrt(self.antennas_transmitter)) 
         # transmit through the channel symbols that are already withened and compressed in prepare_latents() function;
-        z = {idx:  (channel[idx] @ self.F @ self.tx_latents[idx]) + awgn(sigma=sigma_, size = (self.antennas_transmitter, self.n))
-                 for idx in range(len(self.rx_latents))}
-        # perform semantic decoding and alignment matrix: this is the estimated symbols at user side 
-        x_hat = {idx:   (self.G_l[idx] @ z[idx]) 
-                 for idx in range(len(self.rx_latents))}
-        
-        #dewithening step 
-        y_hat = {idx : ( self.L[idx] @ x_hat[idx] ) + self.mean[idx]
-                 for idx in range(len(self.rx_latents))}
+        z = {
+            idx: (channel[idx] @ self.F @ self.tx_latents[idx])
+            + awgn(sigma=sigma_, size=(self.antennas_transmitter, self.n))
+            for idx in range(len(self.rx_latents))
+        }
+        # perform semantic decoding and alignment matrix: this is the estimated symbols at user side
+        x_hat = {
+            idx: (self.G_l[idx] @ z[idx])
+            for idx in range(len(self.rx_latents))
+        }
+
+        # dewithening step
+        y_hat = {
+            idx: (self.L[idx] @ x_hat[idx]) + self.mean[idx]
+            for idx in range(len(self.rx_latents))
+        }
         # pad and decompress symbols to get back to (n x d) original dimensions
-        y_pad = {idx: torch.cat([
-                tensor, 
-                torch.zeros((self.rx_latents[idx].shape[0] - tensor.shape[0], self.n), dtype=torch.complex64)  # Complex padding
-            ], dim=0)
-            for idx, tensor in y_hat.items()}
+        y_pad = {
+            idx: torch.cat(
+                [
+                    tensor,
+                    torch.zeros(
+                        (
+                            self.rx_latents[idx].shape[0] - tensor.shape[0],
+                            self.n,
+                        ),
+                        dtype=torch.complex64,
+                    ),  # Complex padding
+                ],
+                dim=0,
+            )
+            for idx, tensor in y_hat.items()
+        }
 
-        y_hat = {idx : decompress_complex_tensor(y_pad[idx])
-                 for idx in range(len(self.rx_latents))}
-        
-        y_true = {idx : decompress_complex_tensor(self.rx_latents[idx])
-                 for idx in range(len(self.rx_latents))}
-        
-        loss = [(torch.mean((y_true[idx] - y_hat[idx])**2)) for idx in range(len(self.rx_latents))]
+        y_hat = {
+            idx: decompress_complex_tensor(y_pad[idx])
+            for idx in range(len(self.rx_latents))
+        }
 
-        return loss, y_hat 
-config = wandb.config  
+        y_true = {
+            idx: decompress_complex_tensor(self.rx_latents[idx])
+            for idx in range(len(self.rx_latents))
+        }
+
+        loss = [
+            (torch.mean((y_true[idx] - y_hat[idx]) ** 2))
+            for idx in range(len(self.rx_latents))
+        ]
+
+        return loss, y_hat
+
+
+config = wandb.config
+
+
 # ============================================================
 #
 #                     MAIN DEFINITION
@@ -257,7 +306,9 @@ config = wandb.config
 def main() -> None:
     """The main loop."""
     seed_everything(config.seed, workers=True)
-    tabl = pd.DataFrame(columns=["compression_factor","Trace","lambda_value","MSE" ])
+    tabl = pd.DataFrame(
+        columns=['compression_factor', 'Trace', 'lambda_value', 'MSE']
+    )
     # Channel Initialization
     channel_matrixes: dict[int : torch.Tensor] = {
         idx: complex_gaussian_matrix(
@@ -270,11 +321,13 @@ def main() -> None:
         )
         for idx, _ in enumerate(config.agents_models)
     }
-    
+
     # Datamodules Initialization
     datamodules = {
         idx: DataModule(
-            dataset=config.dataset, tx_enc= config.base_station_model, rx_enc=agent_model
+            dataset=config.dataset,
+            tx_enc=config.base_station_model,
+            rx_enc=agent_model,
         )
         for idx, agent_model in enumerate(config.agents_models)
     }
@@ -347,6 +400,7 @@ def main() -> None:
     #plt.grid(True, which="both", ls="--", linewidth=0.5)
     #plt.show()
     return None
+
 
 if __name__ == '__main__':
     main()
