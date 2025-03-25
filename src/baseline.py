@@ -53,21 +53,20 @@ config_dict = {
             "dataset": 'cifar10',
             "antennas_transmitter": 4,
             "antennas_receiver": 4,
-            "base_station_model": "vit_tiny_patch16_224",
+            "base_station_model": "vit_tiny_patch16_224",#"mobilenetv3_large_100",#"rexnet_100",
             "agents_models": [
                 #"vit_tiny_patch16_224",
                 "vit_small_patch16_224",
-                "mobilenetv3_large_100",
+                #"mobilenetv3_large_100",
                 "rexnet_100",
                 "rexnet_130",
                 "rexnet_150",
-                 "vit_small_patch32_224",
-                 "vit_base_patch16_224",
-                 "vit_base_patch32_clip_224",
-                 "mobilenetv3_large_100",
-                 "mobilenetv3_small_100",
-                 "levit_128s.fb_dist_in1k"],
-            "channel_usage": 1,
+                "vit_small_patch32_224",
+                "vit_base_patch16_224",
+                "vit_base_patch32_clip_224",
+                 "mobilenetv3_small_100"],
+                 #"levit_128s.fb_dist_in1k"],
+            "channel_usage": [1],#,2,4,6,16],
             "strategy": "TK"}
 
 wandb.init(project='Multi Agent MIMO Semantic Alignment', config=config_dict)
@@ -85,7 +84,7 @@ class LinearBaseline:
         device: str = 'cpu',
         snr: float = 20.0,
         dual_var: float = None,
-        channel_usage: int = 1,
+        channel_usage: int = None
     ):
         """The LinearBaselineOpt class."""
         self.device = torch.device(device)
@@ -100,10 +99,10 @@ class LinearBaseline:
         self.channel_usage = channel_usage
         self.n = None
         self.power_tx = 1
-        self.lmbd = torch.tensor(0, dtype=torch.float32) #initial lambda value
+        self.lmbd = torch.tensor(1e-1, dtype=torch.float32) #initial lambda value
          #---------------------------------
-        self.F = torch.randn( #Nr x Nt
-            (self.antennas_transmitter, self.antennas_receiver),
+        self.F = torch.randn( #KNr x KNt
+            (self.channel_usage*self.antennas_transmitter, self.channel_usage*self.antennas_receiver),
             dtype=torch.complex64,
         ).to(self.device)
         self.G_l: dict[int : torch.Tensor] = {
@@ -122,6 +121,7 @@ class LinearBaseline:
                     self.tx_latents[idx], self.rx_latents[idx]
                 ).solution
                 self.tx_latents[idx] = self.tx_latents[idx] @ self.W[idx]
+        print("Alignment performed before channel equalization;")
         return None
 
     def prepare_latents(self):
@@ -131,13 +131,19 @@ class LinearBaseline:
         - Outputs : None
         """
         self.n, self.tx_size = self.tx_latents[0].shape
+        #for i in range(len(self.tx_latents)):
+            #print(f"TX shape:{self.tx_latents[i].shape}")
+
         if self.strategy == 'FK':
             self.tx_latents = [
                 self.tx_latents[idx][
-                    :, : self.channel_usage * 2 * self.antennas_transmitter
+                    :, : 2 * self.antennas_transmitter * self.channel_usage
                 ]
                 for idx in range(len(self.tx_latents))
             ]
+        #IL PROBLEMA E' CHE DOPO L'ALIGNMENT CI SONO DIVERSE DIMENSIONALITA', 
+        #DEVI FARE UNA SELZIONE DI TOP-K PER OGNI SPAZIO LATENETE 
+        #E RICONTROLLARE NEL CODICE CHE NON PRENDI IL PRIMO SPAZIO PER FARE TUTTO (MA FARE TUTTO A CICLO!!!!!!!!!)
         if self.strategy == 'TK':
             column_norm = {
                 id: tensor.abs().sum(dim=0)
@@ -145,7 +151,7 @@ class LinearBaseline:
             }
             # Select top-k indices from the first tensor
             first_key = next(iter(column_norm))  # Get first key
-            k = self.channel_usage * 2 * self.antennas_transmitter
+            k =  2 * self.antennas_transmitter * self.channel_usage
             if column_norm[first_key].numel() < k:
                 raise ValueError(
                     f'Not enough features in column_norm[{first_key}]: {column_norm[first_key].numel()} available, but {k} requested.'
@@ -170,24 +176,41 @@ class LinearBaseline:
             complex_compressed_tensor(self.rx_latents[i].T, device=self.device)
             for i in range(len(self.rx_latents))
         ]
-
+    
         self.tx_latents, self.L, self.mean = zip(
             *[
                 prewhiten(tensor, device=self.device)
                 for tensor in self.tx_latents
             ]
         )
-
+        # Once that the features are selected, let's 
+        # prepare X for the channel usage --> x \in (KN_tx,n): 
+        #self.tx_latents = [ self.tx_latents[i].repeat(self.channel_usage,1)
+        #                    for i in range(len(self.tx_latents))]
+        #self.L = [self.L[i].repeat(self.channel_usage, self.channel_usage)
+        #          for i in range(len(self.L))]
+        #self.mean = [self.mean[i].repeat(self.channel_usage,1)
+        #             for i in range(len(self.mean))]
         return None
 
     def equalization(self,
-                     channel_matrixes :dict[int:torch.Tensor]=None):
+                     channel_matrixes :dict[int:torch.Tensor]=None,
+                     iterations:int = 10,
+                     tol:float = 1e-1):
         kron_channels = {user: torch.kron(torch.eye(self.channel_usage, dtype=torch.complex64), channel_matrixes[user])
                          for user in range(len(self.rx_latents))}
         
         for user in range(len(self.rx_latents)):
             self.G_step(idx=user, channel= kron_channels)
         self.F_step(channel=kron_channels)
+        for _ in range(iterations):
+           trace_value = self.update_lambda()
+           self.F_step(channel=kron_channels) 
+        #print(trace_value)
+        #Scaling by Trace to ensure power at the TX 
+        self.F = self.F/math.sqrt(trace_value)
+        self.G_l = {idx: tensor * (math.sqrt(trace_value)) for idx, tensor in self.G_l.items()}
+        print(f"Trace value after scaling is:{torch.trace(self.F @ self.F.H).real.item()}")
         return None
 
     def G_step(self, idx: int, channel: dict[int : torch.Tensor]):
@@ -207,6 +230,7 @@ class LinearBaseline:
     def F_step(self, channel: dict[int, torch.Tensor]):
         """Updates F using iterative method for λ."""
         c = 1 / (self.n * len(self.rx_latents) * self.channel_usage)
+        
         A, B, C = 0, 0, 0
         for user in range(len(self.rx_latents)):
             GH = self.G_l[user] @ channel[user]
@@ -226,26 +250,29 @@ class LinearBaseline:
 
         return None
 
-
-    def update_lambda(self, lr: float = 1e-2):
+    def update_lambda(self, lr: float = 1e2):
         with torch.no_grad():
-            constraint_violation = torch.trace(self.F @ self.F.H).real.item() - self.power_tx
-            print(constraint_violation)
+            trace_value = torch.trace(self.F @ self.F.H).real.item()
+            constraint_violation = trace_value - self.power_tx
+            #print(f"Value of the constraint: {constraint_violation}")
             if constraint_violation > 0:  
                 # Increase lambda if the constraint is violated (power is too high)
-                self.lmbd += lr * constraint_violation  
+                self.lmbd += lr * constraint_violation 
             elif constraint_violation < 0:
                 # Ensure lambda stays non-negative
-                self.lmbd = torch.max(torch.tensor(0.0, device=self.device), self.lmbd)
-        return None
+                self.lmbd = (torch.tensor(0.0)) #torch.max(torch.tensor(0.0, device=self.device), self.lmbd)
+            #print(f"Lambda value: {self.lmbd}") 
+        return trace_value
   
     def evaluate(self, 
-                 channel:list[torch.Tensor]):
+                 channel: dict[int, torch.Tensor]):
+        kron_channels = {user: torch.kron(torch.eye(self.channel_usage, dtype=torch.complex64), channel[user])
+                         for user in range(len(self.rx_latents))}
         sigma_ = sigma_given_snr(snr=self.snr, signal=torch.ones(1)/math.sqrt(self.antennas_transmitter)) 
         # transmit through the channel symbols that are already withened and compressed in prepare_latents() function;
         z = {
-            idx: (channel[idx] @ self.F @ self.tx_latents[idx])
-            + awgn(sigma=sigma_, size=(self.antennas_transmitter, self.n))
+            idx: (kron_channels[idx] @ self.F @ self.tx_latents[idx])
+            + awgn(sigma=sigma_, size=(self.channel_usage* self.antennas_transmitter, self.n))
             for idx in range(len(self.rx_latents))
         }
         # perform semantic decoding and alignment matrix: this is the estimated symbols at user side
@@ -253,7 +280,6 @@ class LinearBaseline:
             idx: (self.G_l[idx] @ z[idx])
             for idx in range(len(self.rx_latents))
         }
-
         # dewithening step
         y_hat = {
             idx: (self.L[idx] @ x_hat[idx]) + self.mean[idx]
@@ -343,10 +369,11 @@ def main() -> None:
                         tx_size =  datamodules[0].train_data.z_tx.shape,
                         strategy= config.strategy,
                         antennas_receiver= config.antennas_receiver,
-                        antennas_transmitter=config.antennas_transmitter
-                        )
+                        antennas_transmitter=config.antennas_transmitter,
+                        channel_usage = config.channel_usage)
     
     compression_factor = (Base.channel_usage*Base.antennas_transmitter/ (Base.tx_size/2) )
+    print(f"Compression Factor in this run is: {compression_factor}")
     #-----------------------------------------------------
     Base.equalization(channel_matrixes= channel_matrixes)
 
@@ -356,54 +383,136 @@ def main() -> None:
     #wandb.log({"mse_list": mse})
     #-----------------------------------------------------
     #tabl = [compression_factor, torch.trace(Base.F@Base.F.H).real, Base.lmbd.data]
-    losses = pd.DataFrame({'Model': config.agents_models, 'MSE': mse})
+    losses = pd.DataFrame({'Usage':config.channel_usage,'Model': config.agents_models, 'MSE': mse})
 
     print(losses)
     #wandb.log({"table": losses})
-    #trace = torch.trace(Base.F@Base.F.H).real.item()-1
-    #def f(lam,trace_val):
-    #   return lam * (trace_val)
+    #trace = torch.trace(Base.F @ Base.F.H).real.item() - 1
+#
+    #def f(lam, trace_val):
+    #    return lam * (trace_val)
 #
     #lambdas = np.logspace(-10, 1, num=200)
-#
-    ## Compute f(lambda) for each lambda
     #f_values = f(lambdas, trace)
-#
-    ## Plot the function
-    #plt.figure(figsize=(8, 5))
-    #plt.semilogx(lambdas, f_values, label=r'$f(\lambda) = \lambda\,(\mathrm{trace}(F F^H)-1)$')
-    #plt.xlabel(r'$\lambda$', fontsize=12)
-    #plt.ylabel('f(lambda)', fontsize=12)
-    #plt.title('Plot of $f(\\lambda)$ vs $\\lambda$', fontsize=14)
-    #plt.legend()
-    #plt.grid(True, which="both", ls="--", linewidth=0.5)
-    #plt.show()
 #
     #lambda_vals = np.logspace(-6, 6, num=200)
     #trace_vals = []
 #
-    ## Loop over the lambda values
+    ## Loop over the lambda values and compute trace values
     #for lam in lambda_vals:
     #    Base.lmbd = lam  # update the lambda in your instance
     #    Base.F_step(channel_matrixes)  # update F based on the current lambda
-    #    # Compute trace(F @ F.H). Since F is a torch tensor, use .conj().T for the Hermitian.
-    #    current_trace = torch.trace(Base.F @ Base.F.H).item()
+    #    current_trace = torch.trace(Base.F @ Base.F.H).item()  # compute trace
     #    trace_vals.append(current_trace)
 #
-    ## Plot trace(F @ F.H) versus lambda
-    #plt.figure(figsize=(8, 5))
-    #plt.semilogx(lambda_vals, trace_vals, label=r'$\operatorname{trace}(F F^H)$')
-    #plt.xlabel(r'$\lambda$', fontsize=12)
-    #plt.ylabel(r'$\operatorname{trace}(F F^H)$', fontsize=12)
-    #plt.title('Trace of $F F^H$ vs. $\lambda$', fontsize=14)
-    #plt.legend()
-    #plt.grid(True, which="both", ls="--", linewidth=0.5)
+    ## Create a figure with 1 row and 2 columns of subplots
+    #fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+#
+    ## First subplot: Plot f(lambda) vs lambda
+    #axes[0].semilogx(lambdas, f_values, label=r'$f(\lambda) = \lambda\,(\mathrm{trace}(F F^H)-1)$')
+    #axes[0].set_xlabel(r'$\lambda$', fontsize=12)
+    #axes[0].set_ylabel('f(lambda)', fontsize=12)
+    #axes[0].set_title('Plot of $f(\\lambda)$ vs $\\lambda$', fontsize=14)
+    #axes[0].legend()
+    #axes[0].grid(True, which="both", ls="--", linewidth=0.5)
+#
+    ## Second subplot: Plot trace(F @ F.H) vs lambda
+    #axes[1].semilogx(lambda_vals, trace_vals, label=r'$\operatorname{trace}(F F^H)$')
+    #axes[1].set_xlabel(r'$\lambda$', fontsize=12)
+    #axes[1].set_ylabel(r'$\operatorname{trace}(F F^H)$', fontsize=12)
+    #axes[1].set_title('Trace of $F F^H$ vs. $\lambda$', fontsize=14)
+    #axes[1].legend()
+    #axes[1].grid(True, which="both", ls="--", linewidth=0.5)
+
+    #plt.tight_layout()
+    #wandb.log({"plot": wandb.Image(fig)})
     #plt.show()
     return None
 
 
+def main_prova() -> None:
+    """The main loop."""
+    seed_everything(config.seed, workers=True)
+    
+    # Channel Initialization
+    channel_matrixes: dict[int, torch.Tensor] = {
+        idx: complex_gaussian_matrix(
+            0,
+            1,
+            (
+                config.antennas_receiver,
+                config.antennas_transmitter,
+            ),
+        )
+        for idx, _ in enumerate(config.agents_models)
+    }
+    
+    # Datamodules Initialization
+    datamodules = {
+        idx: DataModule(
+            dataset=config.dataset,
+            tx_enc=config.base_station_model,
+            rx_enc=agent_model,
+        )
+        for idx, agent_model in enumerate(config.agents_models)
+    }
+    
+    for datamodule in datamodules.values():
+        datamodule.prepare_data()
+        datamodule.setup()
+    
+    # List to collect results for each channel usage value.
+    results = []
+    
+    # Iterate over each channel usage value.
+    for usage in config.channel_usage:
+        # Create a LinearBaseline instance with the current channel usage.
+        Base = LinearBaseline(
+            tx_latents={id: datamodule.train_data.z_tx 
+                        for id, datamodule in datamodules.items()},
+            rx_latents={id: datamodule.train_data.z_rx 
+                        for id, datamodule in datamodules.items()},
+            tx_size=datamodules[0].train_data.z_tx.shape,
+            strategy=config.strategy,
+            antennas_receiver=config.antennas_receiver,
+            antennas_transmitter=config.antennas_transmitter,
+            channel_usage=usage  # Use the current channel usage value.
+        )
+        
+        # Calculate compression factor.
+        compression_factor = (usage  / (Base.tx_size)/2)
+#        print(f"Compression Factor in this run with channel usage {usage} is: {compression_factor}")
+#        
+#        # Perform equalization and evaluate.
+#        Base.equalization(channel_matrixes=channel_matrixes)
+#        mse, y_preds = Base.evaluate(channel=channel_matrixes)
+#        
+#        mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
+#                    for model, mse_value in zip(config.agents_models, mse)}
+#        mse_dict['Channel Usage'] = usage  # Add the current channel usage.
+#        results.append(mse_dict)
+#    
+#    # Create a DataFrame with all results.
+#    losses = pd.DataFrame(results)
+#    print(losses)
+#    plt.figure(figsize=(10,6))
+#    for model in config.agents_models:
+#        plt.plot(
+#        losses['Channel Usage'], 
+#        losses[model], 
+#        marker='o', 
+#        label=model
+#    )
+#
+#    plt.xlabel("Channel Usage")
+#    plt.ylabel("MSE")
+#    plt.title("MSE vs Channel Usage per Model")
+#    plt.legend(title="Latent spaces logic")
+#    plt.grid(True)
+#    plt.show()
+
 if __name__ == '__main__':
-    main()
+    main_prova()
 
 #wandb.finish()
 
