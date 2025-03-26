@@ -46,8 +46,8 @@ class BaseStation:
             The channel usage of the communication. Default 1.
         rho : float
             The rho coeficient for the admm method. Default 1e-1.
-        px_cost : int
-            The transmitter power constraint. Default 1.
+        px_cost : float
+            The transmitter power constraint. Default 1.0.
         device : str
             The device on which we run the simulation. Default "cpu".
 
@@ -83,7 +83,7 @@ class BaseStation:
         antennas_transmitter: int,
         channel_usage: int = 1,
         rho: float = 1e-1,
-        px_cost: int = 1,
+        px_cost: float = 1.0,
         device: str = 'cpu',
     ) -> None:
         self.model: str = model
@@ -91,7 +91,7 @@ class BaseStation:
         self.antennas_transmitter: int = antennas_transmitter
         self.channel_usage: int = channel_usage
         self.rho: float = rho
-        self.px_cost: int = px_cost
+        self.px_cost: float = px_cost
         self.device: str = device
 
         # Attributes Initialization
@@ -308,7 +308,7 @@ class BaseStation:
 
         # Variables
         _, n = self.agents_pilots[idx].shape
-        rho = self.rho * len(self.agents_id) * n
+        rho = self.rho * n
         B = torch.linalg.inv(
             self.agents_pilots[idx] @ self.agents_pilots[idx].H
         )
@@ -608,8 +608,6 @@ class Agent:
             msg : torch.Tensor
                 The decoded message.
         """
-        msg = msg.T
-
         # Pass through the channel if base station was not aware
         if not channel_awareness:
             msg = self.channel_matrix @ msg
@@ -634,7 +632,6 @@ class Agent:
         self,
         input: torch.Tensor,
         output: torch.Tensor,
-        channel_awareness: bool,
     ) -> float:
         """Eval an input given an expected output.
 
@@ -643,8 +640,6 @@ class Agent:
                 The input tensor.
             output : torch.Tensor
                 The output tensor.
-            channel_awareness : bool
-                The awareness of the base station about the channel state.
 
         Returns:
             float
@@ -657,10 +652,12 @@ class Agent:
         input = input.to(self.device)
         output = output.to(self.device)
 
-        decoded = self.decode(input, channel_awareness=channel_awareness)
-        return torch.nn.functional.mse_loss(
-            decoded, output, reduction='mean'
-        ).item()
+        return (
+            torch.nn.functional.mse_loss(
+                input, output, reduction='mean'
+            ).item()
+            / self.channel_usage
+        )
 
 
 # ============================================================

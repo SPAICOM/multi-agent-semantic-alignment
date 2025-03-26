@@ -68,19 +68,28 @@ def setup(
 )
 def main(cfg: DictConfig) -> None:
     """The main loop."""
+
+    # Only square channel if cfg.communication.square is set to true
+    if cfg.communication.square and (
+        cfg.communication.antennas_receiver
+        != cfg.communication.antennas_transmitter
+    ):
+        return None
+
     # Define some usefull paths
     CURRENT: Path = Path('.')
     MODEL_PATH: Path = CURRENT / 'models'
-    RESULTS_PATH: Path = CURRENT / 'results'
+    RESULTS_PATH: Path = CURRENT / 'results/linear_model'
 
     # Create results directory
-    RESULTS_PATH.mkdir(exist_ok=True)
+    RESULTS_PATH.mkdir(exist_ok=True, parents=True)
 
     # Define some variables
     trainer: Trainer = Trainer(
         inference_mode=True,
         enable_progress_bar=False,
         logger=False,
+        accelerator=cfg.device,
     )
 
     # Setup procedure
@@ -232,13 +241,13 @@ def main(cfg: DictConfig) -> None:
                 idx, datamodule.train_data.z_tx.T
             )
 
-            if cfg.metrics.train_acc:
-                # Decode the msg from the base station
-                received: torch.Tensor = agents[idx].decode(
-                    msg.T,
-                    channel_awareness=base_station.is_channel_aware(idx),
-                )
+            # Decode the msg from the base station
+            received: torch.Tensor = agents[idx].decode(
+                msg,
+                channel_awareness=base_station.is_channel_aware(idx),
+            )
 
+            if cfg.metrics.train_acc:
                 # Get accuracy
                 dataloaders[idx] = DataLoader(
                     TensorDataset(received, datamodule.train_data.labels),
@@ -254,9 +263,8 @@ def main(cfg: DictConfig) -> None:
             losses[
                 f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Train)'
             ]: float = agents[idx].eval(
-                msg.T,
+                received,
                 datamodule.train_data.z_rx,
-                channel_awareness=base_station.is_channel_aware(idx),
             )
 
         wandb.log(losses)
@@ -288,13 +296,13 @@ def main(cfg: DictConfig) -> None:
                 idx, datamodule.val_data.z_tx.T
             )
 
-            if cfg.metrics.val_acc:
-                # Decode the msg from the base station
-                received: torch.Tensor = agents[idx].decode(
-                    msg.T,
-                    channel_awareness=base_station.is_channel_aware(idx),
-                )
+            # Decode the msg from the base station
+            received: torch.Tensor = agents[idx].decode(
+                msg,
+                channel_awareness=base_station.is_channel_aware(idx),
+            )
 
+            if cfg.metrics.val_acc:
                 # Get accuracy
                 dataloaders[idx] = DataLoader(
                     TensorDataset(received, datamodule.val_data.labels),
@@ -310,9 +318,8 @@ def main(cfg: DictConfig) -> None:
             losses[
                 f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Val)'
             ]: float = agents[idx].eval(
-                msg.T,
+                received,
                 datamodule.val_data.z_rx,
-                channel_awareness=base_station.is_channel_aware(idx),
             )
 
         wandb.log(losses)
@@ -347,7 +354,7 @@ def main(cfg: DictConfig) -> None:
 
         # Decode the msg from the base station
         received: torch.Tensor = agents[idx].decode(
-            msg.T,
+            msg,
             channel_awareness=base_station.is_channel_aware(idx),
         )
 
@@ -362,9 +369,8 @@ def main(cfg: DictConfig) -> None:
 
         # Get alignment loss
         loss: float = agents[idx].eval(
-            msg.T,
+            received,
             datamodule.test_data.z_rx,
-            channel_awareness=base_station.is_channel_aware(idx),
         )
         losses[f'Agent-{idx} ({agents[idx].model_name})'] = loss
 

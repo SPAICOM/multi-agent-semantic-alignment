@@ -3,7 +3,6 @@ defaults:
 
 seed: 42
 device: cpu
-iterations: 30
 
 datamodule:
   dataset: cifar10
@@ -22,12 +21,14 @@ communication:
   
 base_station:
   model: vit_tiny_patch16_224
-  rho: 1
+  lmb: 1e-1
+  lr: 1e-1
   px_cost: 1.0
+  strategy: FK
+  iterations: 30
   channel_aware: true
 
 agents:
-  privacy: true
   models:
     - vit_small_patch16_224
     - vit_small_patch32_224
@@ -41,4 +42,4 @@ agents:
     - levit_128s.fb_dist_in1k
 
 wandb:
-  project: multi_agent_semantic_alignment__linear_model
+  project: multi_agent_semantic_alignment__baseline_model
