@@ -46,8 +46,8 @@ class BaseStation:
             The channel usage of the communication. Default 1.
         rho : float
             The rho coeficient for the admm method. Default 1e-1.
-        px_cost : int
-            The transmitter power constraint. Default 1.
+        px_cost : float
+            The transmitter power constraint. Default 1.0.
         device : str
             The device on which we run the simulation. Default "cpu".
 
@@ -83,7 +83,7 @@ class BaseStation:
         antennas_transmitter: int,
         channel_usage: int = 1,
         rho: float = 1e-1,
-        px_cost: int = 1,
+        px_cost: float = 1.0,
         device: str = 'cpu',
     ) -> None:
         self.model: str = model
@@ -91,7 +91,7 @@ class BaseStation:
         self.antennas_transmitter: int = antennas_transmitter
         self.channel_usage: int = channel_usage
         self.rho: float = rho
-        self.px_cost: int = px_cost
+        self.px_cost: float = px_cost
         self.device: str = device
 
         # Attributes Initialization
@@ -165,7 +165,7 @@ class BaseStation:
             f'Agent of id {idx} already connected to the base station.'
         )
         assert self.dim == pilots.shape[0], (
-            "The dimention of the semantic pilots doesn't match the dimetion of the base station encodings."
+            "The dimention of the semantic pilots doesn't match the dimention of the base station encodings."
         )
 
         # Connect the agent to the base station
@@ -207,21 +207,6 @@ class BaseStation:
         """
         return torch.trace(self.F.H @ self.F).real.item()
 
-    def get_dual_loss_regolarized(self) -> float:
-        """Get the regolarized dual loss.
-
-        Args:
-            None
-
-        Returns:
-            float
-                The regolarized dual loss.
-        """
-        n = sum([a.shape[-1] for a in self.agents_pilots.values()])
-        return (
-            self.rho * n * torch.norm(self.F - self.Z + self.U, p='fro') ** 2
-        )
-
     def __compression_and_prewhitening(
         self,
         msg: torch.Tensor,
@@ -259,6 +244,8 @@ class BaseStation:
                 The idx of the specific agent.
             msg : torch.Tensor
                 A message to send to an agent.
+            alignment : bool
+                Set to True if the Base Station is in alignment mode. Default False.
 
         Returns:
             msg : torch.Tensor
@@ -303,12 +290,12 @@ class BaseStation:
 
     def __F_local_step(
         self,
-        msg: dict[int | str, torch.Tensor],
+        msg: dict[str, torch.Tensor],
     ) -> None:
         """The local F step for an agent.
 
         Args:
-            msg : dict[int | str, torch.Tensor]
+            msg : dict[str, torch.Tensor]
                 The message from the agent.
 
         Returns:
@@ -321,7 +308,7 @@ class BaseStation:
 
         # Variables
         _, n = self.agents_pilots[idx].shape
-        rho = self.rho * len(self.agents_id) * n
+        rho = self.rho * n
         B = torch.linalg.inv(
             self.agents_pilots[idx] @ self.agents_pilots[idx].H
         )
@@ -346,7 +333,7 @@ class BaseStation:
         """
         # Check if all agents did transmit their message
         assert len(self.F_agent) == len(self.agents_id), (
-            f'The following agents did not communicate with the base station:\n\t{self.agents_id - set(self.F_agent.keys())}'
+            f'The following agents are not registered in the base station:\n\t{self.agents_id - set(self.F_agent.keys())}'
         )
 
         # Performe aggregation of the F
@@ -409,7 +396,7 @@ class BaseStation:
         """Procedure when the base line receives a message from an agent.
 
         Args:
-            msg : dict[int | str, torch.Tensor]
+            msg : dict[str, torch.Tensor]
                 The message from the agent.
 
         Returns:
@@ -558,6 +545,8 @@ class Agent:
         Args:
             received : torch.Tensor
                 The message from the base station.
+            channel_awareness : bool
+                If the baseline is channel aware or not.
 
         Returns:
             None
@@ -578,15 +567,17 @@ class Agent:
         self,
         received: torch.Tensor,
         channel_awareness: bool,
-    ) -> dict[int | str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """The agent step.
 
         Args:
             received : torch.Tensor
                 The message from the base station.
+            channel_awareness : bool
+                If the baseline is channel aware or not.
 
         Returns:
-            msg : dict[int | str, torch.Tensor]
+            msg : dict[str, torch.Tensor]
                 The message to send to the base station.
         """
         received = received.to(self.device)
@@ -617,8 +608,6 @@ class Agent:
             msg : torch.Tensor
                 The decoded message.
         """
-        msg = msg.T
-
         # Pass through the channel if base station was not aware
         if not channel_awareness:
             msg = self.channel_matrix @ msg
@@ -643,7 +632,6 @@ class Agent:
         self,
         input: torch.Tensor,
         output: torch.Tensor,
-        channel_awareness: bool,
     ) -> float:
         """Eval an input given an expected output.
 
@@ -652,8 +640,6 @@ class Agent:
                 The input tensor.
             output : torch.Tensor
                 The output tensor.
-            channel_awareness : bool
-                The awareness of the base station about the channel state.
 
         Returns:
             float
@@ -666,10 +652,12 @@ class Agent:
         input = input.to(self.device)
         output = output.to(self.device)
 
-        decoded = self.decode(input, channel_awareness=channel_awareness)
-        return torch.nn.functional.mse_loss(
-            decoded, output, reduction='mean'
-        ).item()
+        return (
+            torch.nn.functional.mse_loss(
+                input, output, reduction='mean'
+            ).item()
+            / self.channel_usage
+        )
 
 
 # ============================================================
@@ -686,14 +674,21 @@ def main() -> None:
 
     # Variables definition
     n: int = 100
+    rho: float = 1e-1
+    snr: float = 20.0
     iterations: int = 1
+    px_cost: float = 1.0
     tx_dim: int = 384
     rx_dim: int = 768
+    channel_usage: int = 2
+    channel_aware: bool = False
     antennas_transmitter: int = 4
     antennas_receiver: int = 4
     channel_matrix: torch.Tensor = complex_gaussian_matrix(
         mean=0, std=1, size=(antennas_receiver, antennas_transmitter)
     )
+    privacy: bool = True
+    device: str = 'cpu'
 
     # Get the semantic pilots
     tx_pilots: torch.Tensor = torch.randn(n, tx_dim)
@@ -705,21 +700,33 @@ def main() -> None:
         0: Agent(
             id=0,
             pilots=rx_pilots,
+            model_name='an incredible name',
             antennas_receiver=antennas_receiver,
             channel_matrix=channel_matrix,
+            channel_usage=channel_usage,
+            snr=snr,
+            privacy=privacy,
+            device=device,
         )
     }
 
     # Base Station Initialization
     base_station = BaseStation(
+        model='an incredible model',
         dim=tx_dim,
         antennas_transmitter=antennas_transmitter,
+        channel_usage=channel_usage,
+        rho=rho,
+        px_cost=px_cost,
+        device=device,
     )
 
     # Perform Handshaking
     for agent_id in agents:
         base_station.handshake_step(
-            idx=agent_id, pilots=tx_pilots, channel_matrix=channel_matrix
+            idx=agent_id,
+            pilots=tx_pilots,
+            channel_matrix=channel_matrix if channel_aware else None,
         )
 
     # Base Station - Agent alignment

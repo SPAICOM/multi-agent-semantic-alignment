@@ -132,6 +132,8 @@ def main() -> None:
         'mobilenetv3_small_100',
         'efficientvit_m5.r224_in1k',
         'levit_128s.fb_dist_in1k',
+        'tf_mobilenetv3_small_minimal_100.in1k',
+        'convnext_tiny.in12k',
     ]
 
     # Donwload Classifiers

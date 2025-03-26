@@ -1,5 +1,27 @@
 # Federated Latent Space Alignment for Multi-user Semantic Communications
 
+## Simulations
+
+### Accuracy Vs Compression Factor
+
+```bash
+uv run scripts/train_linear.py communication.channel_usage=1,2,4,6,8 communication.antennas_receiver=1,2,4,8 communication.antennas_transmitter=1,2,4,8 seed=27,42,100,123,144,200 -m
+```
+
+```bash
+uv run scripts/train_baseline.py communication.channel_usage=1,2,4,6,8 communication.antennas_receiver=1,2,4,8 communication.antennas_transmitter=1,2,4,8 seed=27,42,100,123,144,200 -m
+```
+
+### Accuracy Vs SNR
+
+```bash
+uv run scripts/train_linear.py communication.channel_usage=1 communication.antennas_receiver=8 communication.antennas_transmitter=8 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 -m
+```
+
+```bash
+uv run scripts/train_baseline.py communication.channel_usage=1 communication.antennas_receiver=8 communication.antennas_transmitter=8 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=FK,Top-K -m
+```
+
 ## Dependencies  
 
 ### Using `pip` package manager  
@@ -42,7 +64,13 @@ To install `uv`, follow the instructions from the [official installation guide](
 
 #### Set up the environment and install dependencies  
 
-Run the following command in the root folder:  
+Simply run a script with:
+
+```bash
+uv run path/to/script.py
+```
+
+Or Run the following command in the root folder:  
 
 ```bash
 uv sync
@@ -51,22 +79,6 @@ uv sync
 This will automatically create a virtual environment (if none exists) and install all dependencies.  
 
 You're ready to go! 🚀  
-
-### Using `nix` with flakes  
-
-If you have [Nix](https://nixos.org) installed and flakes enabled, you can set up the dependencies using the provided `flake.nix` and `flake.lock` files.  
-
-#### Set up the environment  
-
-Simply run the following command in the root folder:  
-
-```bash
-nix develop
-```
-
-This will automatically provide all dependencies specified in the `flake.nix` without needing a virtual environment.  
-
-You're ready to go! 🚀
 
 ## Authors
 
