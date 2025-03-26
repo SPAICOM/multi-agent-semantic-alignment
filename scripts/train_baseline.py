@@ -64,8 +64,9 @@ config_dict = {
             "dataset": 'cifar10',
             "antennas_transmitter": 8,
             "antennas_receiver": 8,
-            "base_station_model":"vit_tiny_patch16_224",
+            "base_station_model":"vit_small_patch16_224",
             "agents_models": [
+                            "mobilenetv3_large_100",
                             "vit_small_patch16_224",
                             "vit_small_patch32_224",
                             "vit_base_patch16_224",
@@ -201,7 +202,8 @@ def main(config:dict = config_dict):
         f'Agent-{idx} (config.agents_models[idx]) - MSE loss (Train)'
     ]: float = mse[idx]
 
-    print(accuracy)
+    for i in accuracy:
+        print(f"{i} /n")
 
     return None
 

@@ -10,12 +10,11 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import random
 import wandb
+from types import SimpleNamespace
 from scipy.linalg import solve_sylvester
 from torch.utils.data import TensorDataset, DataLoader
-from src.neural_models import Classifier
 from pathlib import Path
-from dotenv import dotenv_values
-from src.download_utils import download_zip_from_gdrive
+
 
 #To be removed after trials 
 if __name__ == "__main__":
@@ -47,31 +46,6 @@ else:
     )
 
 
-def setup(
-    models_path: Path,
-) -> None:
-    """Setup the repository:
-    - downloading classifiers models.
-
-    Args:
-        models_path : Path
-            The path to the models
-    """
-    print()
-    print('Start setup procedure...')
-
-    print()
-    print('Check for the classifiers model availability...')
-    # Download the classifiers if needed
-    # Get from the .env file the zip file Google Drive ID
-    id = dotenv_values()['CLASSIFIERS_ID']
-    download_zip_from_gdrive(id=id, name='classifiers', path=str(models_path))
-
-    print()
-    print('All done.')
-    print()
-    return None
-
 # ============================================================
 #
 #                    BASELINE DEFINITION
@@ -88,17 +62,17 @@ config_dict = {
             "antennas_receiver": 4,
             "base_station_model":"vit_tiny_patch16_224",
             "agents_models": [
-                            "vit_small_patch16_224",
-                            "vit_small_patch32_224",
-                            "vit_base_patch16_224",
-                            "vit_base_patch32_clip_224",
-                            "rexnet_100",
-                            "mobilenetv3_small_075",
-                            "mobilenetv3_large_100",
-                            "mobilenetv3_small_100",
-                            "efficientvit_m5.r224_in1k",
-                            "levit_128s.fb_dist_in1k"],
-            "channel_usage": 2,
+                            "vit_small_patch16_224", #:torch.Size([384, 42500])
+                            "vit_small_patch32_224", #:torch.Size([384, 42500])
+                            #"vit_base_patch16_224",
+                            #"vit_base_patch32_clip_224",
+                            #"rexnet_100",
+                            "mobilenetv3_small_075", #:torch.Size([1024, 42500])
+                            "mobilenetv3_large_100", #:torch.Size([1080, 42500])
+                            #"mobilenetv3_small_100",
+                            #"efficientvit_m5.r224_in1k",
+                            "levit_128s.fb_dist_in1k"], #torch.Size([384, 42500])
+            "channel_usage": 8,
             "strategy": "FK"}
 
 wandb.init(project='Multi Agent MIMO Semantic Alignment', config=config_dict)
@@ -143,16 +117,16 @@ class LinearBaseline:
         self.W = {
             idx: None for idx in range(len(rx_latents))
         }  # alignment matrix
-        self.alignment_matrix()
+        #self.alignment_matrix()
         self.prepare_latents()
 
-    def alignment_matrix(self):
+    def alignment_step(self):
         with torch.no_grad():
             for idx in range(len(self.rx_latents)):
                 self.W[idx] = torch.linalg.lstsq(
                     self.tx_latents[idx], self.rx_latents[idx]
                 ).solution
-                self.tx_latents[idx] = self.tx_latents[idx] @ self.W[idx]
+                self.tx_latents[idx] = self.W[idx] @ self.tx_latents[idx] 
         print("Alignment performed before channel equalization;")
         return None
 
@@ -163,7 +137,6 @@ class LinearBaseline:
         - Outputs : None
         """
         self.n, self.tx_size = self.tx_latents[0].shape
-        print(self.n, self.tx_size)
 
         if self.strategy == 'FK':
             self.tx_latents = [
@@ -177,6 +150,7 @@ class LinearBaseline:
             k = 2 * self.antennas_transmitter * self.channel_usage
             for id, tensor in self.tx_latents.items():
                 values,indexes = torch.topk(tensor.abs(), k, dim=1)
+                print(self.tx_latents[id].shape)
                 topk_latents = torch.gather(tensor, dim=1, index =indexes)
                 self.tx_latents[id] = topk_latents
 
@@ -211,8 +185,7 @@ class LinearBaseline:
         for user in range(len(self.rx_latents)):
             self.G_step(idx=user, channel= kron_channels)
         self.F_step(channel=kron_channels)
-        trace_value = self.update_lambda(kron_channels)
-        self.F_step(channel=kron_channels) 
+        trace_value = self.update_lambda(kron_channels) 
         print(f"Trace value before scaling is:{trace_value}")
 
         #Scaling by Trace to ensure power at the TX 
@@ -259,29 +232,30 @@ class LinearBaseline:
 
         return None
 
-    def update_lambda(self, kron_channels :dict[int:torch.Tensor], lr: float = 1e4, tolerance:float = 1e-1, max_iter= 2000):
+    def update_lambda(self, kron_channels :dict[int:torch.Tensor], lr: float = 1e-1, tolerance:float = 1e-2, max_iter= 3000):
         with torch.no_grad():
             iter_counter=0
             trace_value = torch.trace(self.F @ self.F.H).real.item()
             constraint_violation = trace_value - self.power_tx
+            print(f"Constraint before lambda process: {constraint_violation}")
             #If the constraint is active, i.e. (Tr(FF)>=p_tx), lambda* should be greater then zero 
             # and such that Tr(FF)*lambda=p_tx
-            if constraint_violation > 0:
+            if constraint_violation >= 0:
                #Solving by fixed point ietartions
                while abs(constraint_violation) > tolerance and iter_counter < max_iter:
                    #make adaptive to increase convergence speed
-                   current_lr = lr / (1 + iter_counter)
-                   self.lmbd = self.lmbd + (current_lr * constraint_violation)
+                   #current_lr = lr / (1 + iter_counter)
+                   self.lmbd = self.lmbd + (lr * constraint_violation)
                    trace_value = torch.trace(self.F @ self.F.H).real.item()
                    self.F_step(channel= kron_channels)
                    constraint_violation = trace_value - self.power_tx
                    iter_counter +=1
-                   if iter_counter%100==0:
-                    print(f"Lambda value: {self.lmbd}, Value of the constraint: {constraint_violation}") 
+                   if iter_counter%50==0:
+                     print(f"Lambda value: {self.lmbd}, Value of the constraint: {constraint_violation}") 
             # If constraint is not active, i.e. (Tr(FF)<p_tx), lambda*=0
             elif constraint_violation < 0:
                 self.lmbd = torch.tensor(0.0)
-            print(f"Lambda value: {self.lmbd}, Value of the constraint: {constraint_violation}") 
+            print(f"Lambda value: {self.lmbd}, Value of the constraint after lambda process: {constraint_violation}") 
             return trace_value
   
     def evaluate(self, 
@@ -312,7 +286,7 @@ class LinearBaseline:
                     tensor,
                     torch.zeros(
                         (
-                            self.rx_latents[idx].shape[0] - tensor.shape[0],
+                            self.tx_latents[idx].shape[0] - tensor.shape[0],
                             self.n,
                         ),
                         dtype=torch.complex64,
@@ -323,7 +297,7 @@ class LinearBaseline:
             for idx, tensor in y_hat.items()
         }
 
-        y_hat = {
+        y_preds = {
             idx: decompress_complex_tensor(y_pad[idx])
             for idx in range(len(self.rx_latents))
         }
@@ -332,28 +306,27 @@ class LinearBaseline:
             idx: decompress_complex_tensor(self.rx_latents[idx])
             for idx in range(len(self.rx_latents))
         }
+        
+        with torch.no_grad():
+            for idx in range(len(self.rx_latents)):
+                self.W[idx] = torch.linalg.lstsq(
+                    y_preds[idx].T, y_true[idx].T
+                ).solution.T
+                y_preds[idx] = self.W[idx] @ y_preds[idx]
+        print("Alignment performed before channel equalization;")
 
         loss = [
-            (torch.mean((y_true[idx] - y_hat[idx]) ** 2))
+            (torch.mean((y_preds[idx] - y_true[idx]) ** 2))
             for idx in range(len(self.rx_latents))
         ]
-
-        return loss, y_hat
-
-
-config = wandb.config
-# Define some variables
-trainer: Trainer = Trainer(
-        inference_mode=True,
-        enable_progress_bar=False,
-        logger=False,)
+        return loss, y_preds
 
 # ============================================================
 #
 #                     MAIN DEFINITION
 #
 # ============================================================
-def main() -> None:
+def main__() -> None:
     """The main loop."""
     seed_everything(config.seed, workers=True)
     tabl = pd.DataFrame(
@@ -454,8 +427,9 @@ def main() -> None:
     return None
 
 
-def main_prova() -> None:
+def main(config = config_dict) -> None:
     """The main loop."""
+    config = SimpleNamespace(**config_dict)
     seed_everything(config.seed, workers=True)
     
     # Channel Initialization
@@ -486,7 +460,7 @@ def main_prova() -> None:
         datamodule.setup()
     
     # List to collect results for each channel usage value.
-    #results = []
+    results = []
     Base = LinearBaseline(
         tx_latents={id: datamodule.train_data.z_tx 
                     for id, datamodule in datamodules.items()},
@@ -506,17 +480,17 @@ def main_prova() -> None:
     # mse: list of mse for each user language;
     # y_preds: dictionary of {idx:y_hat} where y_hat should be used to the classification task
     mse, y_preds = Base.evaluate(channel=channel_matrixes) 
-    #mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
-                #for model, mse_value in zip(config.agents_models, mse)}
-    #mse_dict['Channel Usage'] = config.channel_usage  # Add the current channel usage.
-    #results.append(mse_dict)
+    mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
+                for model, mse_value in zip(config.agents_models, mse)}
+    mse_dict['Channel Usage'] = config.channel_usage  # Add the current channel usage.
+    results.append(mse_dict)
     # Create a DataFrame with all results.
-    #losses = pd.DataFrame(results)
-    #print(losses)
+    losses = pd.DataFrame(results)
+    print(losses)
     
 
 
 if __name__ == '__main__':
-    main_prova()
+    main()
 
 #wandb.finish()
