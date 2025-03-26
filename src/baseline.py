@@ -11,7 +11,11 @@ import matplotlib.pyplot as plt
 import random
 import wandb
 from scipy.linalg import solve_sylvester
-from scipy.optimize import bisect
+from torch.utils.data import TensorDataset, DataLoader
+from src.neural_models import Classifier
+from pathlib import Path
+from dotenv import dotenv_values
+from src.download_utils import download_zip_from_gdrive
 
 #To be removed after trials 
 if __name__ == "__main__":
@@ -19,7 +23,7 @@ if __name__ == "__main__":
 else:
     from src.datamodules import DataModule
     
-from pytorch_lightning import seed_everything
+from pytorch_lightning import seed_everything, Trainer
 
 
 if __name__ == '__main__':
@@ -33,7 +37,7 @@ if __name__ == '__main__':
         decompress_complex_tensor,
     )
 else:
-    from utils import (
+    from src.utils import (
         complex_compressed_tensor,
         prewhiten,
         sigma_given_snr,
@@ -42,6 +46,32 @@ else:
         decompress_complex_tensor,
     )
 
+
+def setup(
+    models_path: Path,
+) -> None:
+    """Setup the repository:
+    - downloading classifiers models.
+
+    Args:
+        models_path : Path
+            The path to the models
+    """
+    print()
+    print('Start setup procedure...')
+
+    print()
+    print('Check for the classifiers model availability...')
+    # Download the classifiers if needed
+    # Get from the .env file the zip file Google Drive ID
+    id = dotenv_values()['CLASSIFIERS_ID']
+    download_zip_from_gdrive(id=id, name='classifiers', path=str(models_path))
+
+    print()
+    print('All done.')
+    print()
+    return None
+
 # ============================================================
 #
 #                    BASELINE DEFINITION
@@ -49,11 +79,14 @@ else:
 # ============================================================
 # Da sostituire con Hydra
 config_dict = {
+            "batch_size":512,
+            "device":"cpu",
+            "snr":20.0,
             "seed": 42,
             "dataset": 'cifar10',
             "antennas_transmitter": 4,
             "antennas_receiver": 4,
-            "base_station_model": "vit_tiny_patch16_224",
+            "base_station_model":"vit_tiny_patch16_224",
             "agents_models": [
                             "vit_small_patch16_224",
                             "vit_small_patch32_224",
@@ -65,8 +98,8 @@ config_dict = {
                             "mobilenetv3_small_100",
                             "efficientvit_m5.r224_in1k",
                             "levit_128s.fb_dist_in1k"],
-            "channel_usage": [1,2,4,6,8,12],
-            "strategy": "TK"}
+            "channel_usage": 2,
+            "strategy": "FK"}
 
 wandb.init(project='Multi Agent MIMO Semantic Alignment', config=config_dict)
 
@@ -130,30 +163,22 @@ class LinearBaseline:
         - Outputs : None
         """
         self.n, self.tx_size = self.tx_latents[0].shape
-        #for i in range(len(self.tx_latents)):
-            #print(f"TX shape:{self.tx_latents[i].shape}")
+        print(self.n, self.tx_size)
 
         if self.strategy == 'FK':
             self.tx_latents = [
                 self.tx_latents[idx][
-                    :, : 2 * self.antennas_transmitter * self.channel_usage
+                    :,  : 2 * self.antennas_transmitter * self.channel_usage
                 ]
                 for idx in range(len(self.tx_latents))
             ]
 
         if self.strategy == 'TK':
-            new_tx_latents = {}
             k = 2 * self.antennas_transmitter * self.channel_usage
-
             for id, tensor in self.tx_latents.items():
-                col_norm = tensor.abs().sum(dim=0)
-                if col_norm.numel() < k:
-                    raise ValueError(
-                        f'Not enough features in tensor {id}: {col_norm.numel()} available, but {k} requested.'
-                    )
-                _, indices = torch.topk(col_norm, k)
-                new_tx_latents[id] = tensor[:, indices]
-            self.tx_latents = new_tx_latents
+                values,indexes = torch.topk(tensor.abs(), k, dim=1)
+                topk_latents = torch.gather(tensor, dim=1, index =indexes)
+                self.tx_latents[id] = topk_latents
 
         assert self.strategy == 'TK' or self.strategy == 'FK', (
             f'Strategy {self.strategy} is not supported, choose TK or FK'
@@ -175,14 +200,6 @@ class LinearBaseline:
                 for tensor in self.tx_latents
             ]
         )
-        # Once that the features are selected, let's 
-        # prepare X for the channel usage --> x \in (KN_tx,n): 
-        #self.tx_latents = [ self.tx_latents[i].repeat(self.channel_usage,1)
-        #                    for i in range(len(self.tx_latents))]
-        #self.L = [self.L[i].repeat(self.channel_usage, self.channel_usage)
-        #          for i in range(len(self.L))]
-        #self.mean = [self.mean[i].repeat(self.channel_usage,1)
-        #             for i in range(len(self.mean))]
         return None
 
     def equalization(self,
@@ -202,6 +219,7 @@ class LinearBaseline:
         self.F = self.F/math.sqrt(trace_value)
         self.G_l = {idx: tensor * (math.sqrt(trace_value)) for idx, tensor in self.G_l.items()}
         print(f"Trace value after scaling is:{torch.trace(self.F @ self.F.H).real.item()}")
+        print("Equalization Performed")
         return None
 
     def G_step(self, idx: int, channel: dict[int : torch.Tensor]):
@@ -324,7 +342,11 @@ class LinearBaseline:
 
 
 config = wandb.config
-
+# Define some variables
+trainer: Trainer = Trainer(
+        inference_mode=True,
+        enable_progress_bar=False,
+        logger=False,)
 
 # ============================================================
 #
@@ -464,56 +486,37 @@ def main_prova() -> None:
         datamodule.setup()
     
     # List to collect results for each channel usage value.
-    results = []
+    #results = []
+    Base = LinearBaseline(
+        tx_latents={id: datamodule.train_data.z_tx 
+                    for id, datamodule in datamodules.items()},
+        rx_latents={id: datamodule.train_data.z_rx 
+                    for id, datamodule in datamodules.items()},
+        tx_size=datamodules[0].train_data.z_tx.shape,
+        strategy=config.strategy,
+        antennas_receiver=config.antennas_receiver,
+        antennas_transmitter=config.antennas_transmitter,
+        channel_usage=config.channel_usage  # Use the current channel usage value.
+    )
     
-    # Iterate over each channel usage value.
-    for usage in config.channel_usage:
-        # Create a LinearBaseline instance with the current channel usage.
-        Base = LinearBaseline(
-            tx_latents={id: datamodule.train_data.z_tx 
-                        for id, datamodule in datamodules.items()},
-            rx_latents={id: datamodule.train_data.z_rx 
-                        for id, datamodule in datamodules.items()},
-            tx_size=datamodules[0].train_data.z_tx.shape,
-            strategy=config.strategy,
-            antennas_receiver=config.antennas_receiver,
-            antennas_transmitter=config.antennas_transmitter,
-            channel_usage=usage  # Use the current channel usage value.
-        )
-        
-        # Calculate compression factor.
-        compression_factor = (usage  / (Base.tx_size)/2)
-        #print(f"Compression Factor in this run with channel usage {usage} is: {compression_factor}")       
-#        # Perform equalization and evaluate.
-        Base.equalization(channel_matrixes=channel_matrixes)
-        mse, y_preds = Base.evaluate(channel=channel_matrixes) 
-        mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
-                    for model, mse_value in zip(config.agents_models, mse)}
-        mse_dict['Channel Usage'] = usage  # Add the current channel usage.
-        results.append(mse_dict)
-    
+    # Calculate compression factor.
+    compression_factor = (config.channel_usage  / (Base.tx_size)/2)
+    #print(f"Compression Factor in this run with channel usage {usage} is: {compression_factor}")       
+    Base.equalization(channel_matrixes=channel_matrixes)
+    # mse: list of mse for each user language;
+    # y_preds: dictionary of {idx:y_hat} where y_hat should be used to the classification task
+    mse, y_preds = Base.evaluate(channel=channel_matrixes) 
+    #mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
+                #for model, mse_value in zip(config.agents_models, mse)}
+    #mse_dict['Channel Usage'] = config.channel_usage  # Add the current channel usage.
+    #results.append(mse_dict)
     # Create a DataFrame with all results.
-    losses = pd.DataFrame(results)
-    print(losses)
-#    plt.figure(figsize=(10,6))
-#    for model in config.agents_models:
-#        plt.plot(
-#        losses['Channel Usage'], 
-#        losses[model], 
-#        marker='o', 
-#        label=model
-#    )
-#
-#    plt.xlabel("Channel Usage")
-#    plt.ylabel("MSE")
-#    plt.title("MSE vs Channel Usage per Model")
-#    plt.legend(title="Latent spaces logic")
-#    plt.grid(True)
-#    plt.show()
+    #losses = pd.DataFrame(results)
+    #print(losses)
+    
+
 
 if __name__ == '__main__':
     main_prova()
 
 #wandb.finish()
-
-

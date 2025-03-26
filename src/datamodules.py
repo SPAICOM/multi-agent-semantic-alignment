@@ -16,7 +16,7 @@ if __name__ == '__main__':
         download_zip_from_gdrive,
     )
 else:
-    from download_utils import ( # sistemare qui c'era un src. perche' viene richiamato in scripts/
+    from src.download_utils import ( # sistemare qui c'era un src. perche' viene richiamato in scripts/
         download_zip_from_gdrive,
     )
 

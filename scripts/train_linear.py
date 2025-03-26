@@ -234,8 +234,8 @@ def main(cfg: DictConfig) -> None:
 
             if cfg.metrics.train_acc:
                 # Decode the msg from the base station
-                received: torch.Tensor = agents[idx].decode(
-                    msg.T,
+                received: torch.Tensor = agents[idx].decode( #qui!!!
+                    msg.T, #y_hat
                     channel_awareness=base_station.is_channel_aware(idx),
                 )
 
