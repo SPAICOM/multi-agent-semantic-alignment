@@ -53,20 +53,19 @@ config_dict = {
             "dataset": 'cifar10',
             "antennas_transmitter": 4,
             "antennas_receiver": 4,
-            "base_station_model": "vit_tiny_patch16_224",#"mobilenetv3_large_100",#"rexnet_100",
+            "base_station_model": "vit_tiny_patch16_224",
             "agents_models": [
-                #"vit_tiny_patch16_224",
-                "vit_small_patch16_224",
-                #"mobilenetv3_large_100",
-                "rexnet_100",
-                "rexnet_130",
-                "rexnet_150",
-                "vit_small_patch32_224",
-                "vit_base_patch16_224",
-                "vit_base_patch32_clip_224",
-                 "mobilenetv3_small_100"],
-                 #"levit_128s.fb_dist_in1k"],
-            "channel_usage": [1],#,2,4,6,16],
+                            "vit_small_patch16_224",
+                            "vit_small_patch32_224",
+                            "vit_base_patch16_224",
+                            "vit_base_patch32_clip_224",
+                            "rexnet_100",
+                            "mobilenetv3_small_075",
+                            "mobilenetv3_large_100",
+                            "mobilenetv3_small_100",
+                            "efficientvit_m5.r224_in1k",
+                            "levit_128s.fb_dist_in1k"],
+            "channel_usage": [1,2,4,6,8,12],
             "strategy": "TK"}
 
 wandb.init(project='Multi Agent MIMO Semantic Alignment', config=config_dict)
@@ -141,27 +140,20 @@ class LinearBaseline:
                 ]
                 for idx in range(len(self.tx_latents))
             ]
-        #IL PROBLEMA E' CHE DOPO L'ALIGNMENT CI SONO DIVERSE DIMENSIONALITA', 
-        #DEVI FARE UNA SELZIONE DI TOP-K PER OGNI SPAZIO LATENETE 
-        #E RICONTROLLARE NEL CODICE CHE NON PRENDI IL PRIMO SPAZIO PER FARE TUTTO (MA FARE TUTTO A CICLO!!!!!!!!!)
+
         if self.strategy == 'TK':
-            column_norm = {
-                id: tensor.abs().sum(dim=0)
-                for id, tensor in self.tx_latents.items()
-            }
-            # Select top-k indices from the first tensor
-            first_key = next(iter(column_norm))  # Get first key
-            k =  2 * self.antennas_transmitter * self.channel_usage
-            if column_norm[first_key].numel() < k:
-                raise ValueError(
-                    f'Not enough features in column_norm[{first_key}]: {column_norm[first_key].numel()} available, but {k} requested.'
-                )
-            _, indices = torch.topk(column_norm[first_key], k)
-            # Apply feature selection while keeping the dictionary structure
-            self.tx_latents = {
-                id: tensor[:, indices]
-                for id, tensor in self.tx_latents.items()
-            }
+            new_tx_latents = {}
+            k = 2 * self.antennas_transmitter * self.channel_usage
+
+            for id, tensor in self.tx_latents.items():
+                col_norm = tensor.abs().sum(dim=0)
+                if col_norm.numel() < k:
+                    raise ValueError(
+                        f'Not enough features in tensor {id}: {col_norm.numel()} available, but {k} requested.'
+                    )
+                _, indices = torch.topk(col_norm, k)
+                new_tx_latents[id] = tensor[:, indices]
+            self.tx_latents = new_tx_latents
 
         assert self.strategy == 'TK' or self.strategy == 'FK', (
             f'Strategy {self.strategy} is not supported, choose TK or FK'
@@ -195,7 +187,6 @@ class LinearBaseline:
 
     def equalization(self,
                      channel_matrixes :dict[int:torch.Tensor]=None,
-                     iterations:int = 10,
                      tol:float = 1e-1):
         kron_channels = {user: torch.kron(torch.eye(self.channel_usage, dtype=torch.complex64), channel_matrixes[user])
                          for user in range(len(self.rx_latents))}
@@ -203,10 +194,10 @@ class LinearBaseline:
         for user in range(len(self.rx_latents)):
             self.G_step(idx=user, channel= kron_channels)
         self.F_step(channel=kron_channels)
-        for _ in range(iterations):
-           trace_value = self.update_lambda()
-           self.F_step(channel=kron_channels) 
-        #print(trace_value)
+        trace_value = self.update_lambda(kron_channels)
+        self.F_step(channel=kron_channels) 
+        print(f"Trace value before scaling is:{trace_value}")
+
         #Scaling by Trace to ensure power at the TX 
         self.F = self.F/math.sqrt(trace_value)
         self.G_l = {idx: tensor * (math.sqrt(trace_value)) for idx, tensor in self.G_l.items()}
@@ -250,19 +241,30 @@ class LinearBaseline:
 
         return None
 
-    def update_lambda(self, lr: float = 1e2):
+    def update_lambda(self, kron_channels :dict[int:torch.Tensor], lr: float = 1e4, tolerance:float = 1e-1, max_iter= 2000):
         with torch.no_grad():
+            iter_counter=0
             trace_value = torch.trace(self.F @ self.F.H).real.item()
             constraint_violation = trace_value - self.power_tx
-            #print(f"Value of the constraint: {constraint_violation}")
-            if constraint_violation > 0:  
-                # Increase lambda if the constraint is violated (power is too high)
-                self.lmbd += lr * constraint_violation 
+            #If the constraint is active, i.e. (Tr(FF)>=p_tx), lambda* should be greater then zero 
+            # and such that Tr(FF)*lambda=p_tx
+            if constraint_violation > 0:
+               #Solving by fixed point ietartions
+               while abs(constraint_violation) > tolerance and iter_counter < max_iter:
+                   #make adaptive to increase convergence speed
+                   current_lr = lr / (1 + iter_counter)
+                   self.lmbd = self.lmbd + (current_lr * constraint_violation)
+                   trace_value = torch.trace(self.F @ self.F.H).real.item()
+                   self.F_step(channel= kron_channels)
+                   constraint_violation = trace_value - self.power_tx
+                   iter_counter +=1
+                   if iter_counter%100==0:
+                    print(f"Lambda value: {self.lmbd}, Value of the constraint: {constraint_violation}") 
+            # If constraint is not active, i.e. (Tr(FF)<p_tx), lambda*=0
             elif constraint_violation < 0:
-                # Ensure lambda stays non-negative
-                self.lmbd = (torch.tensor(0.0)) #torch.max(torch.tensor(0.0, device=self.device), self.lmbd)
-            #print(f"Lambda value: {self.lmbd}") 
-        return trace_value
+                self.lmbd = torch.tensor(0.0)
+            print(f"Lambda value: {self.lmbd}, Value of the constraint: {constraint_violation}") 
+            return trace_value
   
     def evaluate(self, 
                  channel: dict[int, torch.Tensor]):
@@ -481,20 +483,18 @@ def main_prova() -> None:
         
         # Calculate compression factor.
         compression_factor = (usage  / (Base.tx_size)/2)
-#        print(f"Compression Factor in this run with channel usage {usage} is: {compression_factor}")
-#        
+        #print(f"Compression Factor in this run with channel usage {usage} is: {compression_factor}")       
 #        # Perform equalization and evaluate.
-#        Base.equalization(channel_matrixes=channel_matrixes)
-#        mse, y_preds = Base.evaluate(channel=channel_matrixes)
-#        
-#        mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
-#                    for model, mse_value in zip(config.agents_models, mse)}
-#        mse_dict['Channel Usage'] = usage  # Add the current channel usage.
-#        results.append(mse_dict)
-#    
-#    # Create a DataFrame with all results.
-#    losses = pd.DataFrame(results)
-#    print(losses)
+        Base.equalization(channel_matrixes=channel_matrixes)
+        mse, y_preds = Base.evaluate(channel=channel_matrixes) 
+        mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
+                    for model, mse_value in zip(config.agents_models, mse)}
+        mse_dict['Channel Usage'] = usage  # Add the current channel usage.
+        results.append(mse_dict)
+    
+    # Create a DataFrame with all results.
+    losses = pd.DataFrame(results)
+    print(losses)
 #    plt.figure(figsize=(10,6))
 #    for model in config.agents_models:
 #        plt.plot(
