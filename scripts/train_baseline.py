@@ -4,6 +4,7 @@ This python module computes a simulation of Baseline methods TK and FK;
 
 # Add root to the path
 import sys
+import pandas as pd
 import typing
 from pathlib import Path
 
@@ -57,28 +58,28 @@ def setup(
     return None
 
 config_dict = {
-            "batch_size":512,
-            "device":"cpu",
-            "snr":20.0,
-            "seed": 42,
-            "dataset": 'cifar10',
-            "antennas_transmitter": 8,
-            "antennas_receiver": 8,
-            "base_station_model":"vit_small_patch16_224",
-            "agents_models": [
-                            "mobilenetv3_large_100",
-                            "vit_small_patch16_224",
-                            "vit_small_patch32_224",
-                            "vit_base_patch16_224",
-                            "vit_base_patch32_clip_224",
-                            "rexnet_100",
-                            "mobilenetv3_small_075",
-                            "mobilenetv3_large_100",
-                            "mobilenetv3_small_100",
-                            "efficientvit_m5.r224_in1k",
-                            "levit_128s.fb_dist_in1k"],
-            "channel_usage": 8,
-            "strategy": "FK"}
+    "batch_size": 512,
+    "device": "cpu",
+    "snr": 20.0,#[-20.0,-10.0,10.0,20.0,30.0 ],
+    "seed": 42, #[27, 42, 100, 123, 144, 200],
+    "dataset": 'cifar10',
+    "antennas_transmitter": 8, #[1, 2, 4, 8],
+    "antennas_receiver": 8, #[1, 2, 4, 8],
+    "base_station_model": "vit_tiny_patch16_224", #:torch.Size([192, 42500])
+    "agents_models": [
+                    "vit_small_patch16_224",
+                    "vit_small_patch32_224",
+                    "vit_base_patch16_224",
+                    "vit_base_patch32_clip_224",
+                    "rexnet_100",
+                    "mobilenetv3_small_075",
+                    "mobilenetv3_large_100",
+                    "mobilenetv3_small_100",
+                    "efficientvit_m5.r224_in1k",
+                    "levit_128s.fb_dist_in1k"],
+    "channel_usage": 8, #[1,2,4,6,8],
+    "strategy": "FK"
+}
 
 # =============================================================
 #
@@ -91,7 +92,7 @@ def main(config:dict = config_dict):
     # Define some usefull paths
     CURRENT: Path = Path('.')
     MODEL_PATH: Path = CURRENT / 'models'
-    RESULTS_PATH: Path = CURRENT / 'results'
+    RESULTS_PATH: Path = CURRENT / 'baseline'
 
     # Define some variables
     trainer: Trainer = Trainer(
@@ -142,6 +143,7 @@ def main(config:dict = config_dict):
                     for id, datamodule in datamodules.items()},
         tx_size=datamodules[0].train_data.z_tx.shape,
         strategy=config.strategy,
+        snr= config.snr,
         antennas_receiver=config.antennas_receiver,
         antennas_transmitter=config.antennas_transmitter,
         channel_usage=config.channel_usage  # Use the current channel usage value.
@@ -202,11 +204,171 @@ def main(config:dict = config_dict):
         f'Agent-{idx} (config.agents_models[idx]) - MSE loss (Train)'
     ]: float = mse[idx]
 
-    for i in accuracy:
-        print(f"{i} /n")
+    for i,acc in accuracy.items():
+        print(f"{i}:,{acc} ")
+
+        # Save results
+    #pl.DataFrame(
+    #    {
+    #        'Dataset': config.dataset,
+    #        'Seed': config.seed,
+    #        'Channel Usage': config.channel_usage,
+    #        'Antennas Transmitter': config.antennas_transmitter,
+    #        'Antennas Receiver': config.antennas_receiver,
+    #        'SNR': config.snr,
+    #        'Accuracy': list(accuracy.values()),
+    #        'Agent Model': [
+    #            config.agents_models[int(a.split(' ')[0].split('-')[-1])]
+    #            for a in accuracy
+    #        ],
+    #        'Base Station Model': config.base_station_model,
+    #        'Case': 'Linear Semantic Precoding/Decoding',
+    #    }
+    #).write_parquet(
+    #    RESULTS_PATH
+    #    / f'{config.seed}_{config.channel_usage}_{config.antennas_transmitter}_{config.antennas_receiver}_{config.snr}.parquet'
+    #)
+
+    wandb.finish()
+    return None
 
     return None
 
+def main_runs():
+    # Definisci i percorsi utili
+    CURRENT: Path = Path('.')
+    MODEL_PATH: Path = CURRENT / 'models'
+    RESULTS_PATH: Path = CURRENT / 'results' / 'baseline'
+    RESULTS_PATH.mkdir(exist_ok=True)
+    
+    # Ciclo sui parametri: ogni run avrà seed, channel_usage e antenne (uguali per trasmettitore e ricevitore)
+    for seed_val in config_dict["seed"]:
+        for channel_usage_val in config_dict["channel_usage"]:
+            #for snr_value in config_dict["snr"]:
+              #for antennas_val in config_dict["antennas_transmitter"]:
+                # Crea una copia della configurazione e aggiorna i valori scalari per questo run
+                current_config = config_dict.copy()
+                current_config.update({
+                    "seed": seed_val,
+                    "channel_usage": channel_usage_val,
+                    #'snr': snr_value,
+                    #"antennas_transmitter": antennas_val,
+                    #"antennas_receiver": antennas_val  # antenne uguali
+                })
+                config = SimpleNamespace(**current_config)
+    
+                print(f"\nRunning experiment with seed={seed_val}, "
+                      f"channel_usage={channel_usage_val},"
+                      f"snr={config.snr}",
+                      f"antennas (tx & rx)={config.antennas_transmitter}")
+    
+                # Inizializza il trainer e imposta i percorsi/modelli
+                trainer = Trainer(
+                    inference_mode=True,
+                    enable_progress_bar=False,
+                    logger=False,
+                )
+    
+                setup(models_path=MODEL_PATH)
+                seed_everything(config.seed, workers=True)
+    
+                # Inizializzazione del canale
+                channel_matrixes = {
+                    idx: complex_gaussian_matrix(
+                        0,
+                        1,
+                        (config.antennas_receiver, config.antennas_transmitter)
+                    )
+                    for idx, _ in enumerate(config.agents_models)
+                }
+    
+                # Inizializzazione dei datamodules
+                datamodules = {
+                    idx: DataModule(
+                        dataset=config.dataset,
+                        tx_enc=config.base_station_model,
+                        rx_enc=agent_model,
+                        batch_size=config.batch_size
+                    )
+                    for idx, agent_model in enumerate(config.agents_models)
+                }
+                for datamodule in datamodules.values():
+                    datamodule.prepare_data()
+                    datamodule.setup()
+    
+                # Inizializzazione della classe BaseLine
+                Base = LinearBaseline(
+                    tx_latents={idx: datamodule.train_data.z_tx for idx, datamodule in datamodules.items()},
+                    rx_latents={idx: datamodule.train_data.z_rx for idx, datamodule in datamodules.items()},
+                    tx_size=datamodules[0].train_data.z_tx.shape,
+                    strategy=config.strategy,
+                    snr = config.snr,
+                    antennas_receiver=config.antennas_receiver,
+                    antennas_transmitter=config.antennas_transmitter,
+                    channel_usage=config.channel_usage  # Usa il valore corrente di channel_usage
+                )
+                Base.equalization(channel_matrixes=channel_matrixes)
+                mse, y_preds = Base.evaluate(channel=channel_matrixes)
+    
+                # Inizializzazione dei Classifier
+                classifiers = {}
+                for agent_id in tqdm(range(len(Base.rx_latents)), desc='Initialize Classifiers'):
+                    clf_path = MODEL_PATH / f'classifiers/{config.dataset}/{config.agents_models[agent_id]}/seed_{config.seed}.ckpt'
+                    classifiers[agent_id] = Classifier.load_from_checkpoint(clf_path)
+                    classifiers[agent_id].eval()
+    
+                    clf_datamodule = DataModuleClassifier(
+                        dataset=config.dataset,
+                        rx_enc=config.agents_models[agent_id],
+                        batch_size=config.batch_size,
+                    )
+                    clf_datamodule.prepare_data()
+                    clf_datamodule.setup()
+    
+                # =======================================================================
+                #                 Calcolo delle metriche sul dataset di Train
+                # =======================================================================
+                accuracy = {}
+                dataloaders = {}
+                for idx, datamodule in datamodules.items():
+                    # Decodifica il messaggio dalla base station
+                    received = y_preds[idx].T
+                    dataloaders[idx] = DataLoader(
+                        TensorDataset(received, datamodule.train_data.labels),
+                        batch_size=config.batch_size,
+                    )
+                    accuracy[f'Agent-{idx} ({config.agents_models[idx]}) - Task Accuracy (Train)'] = trainer.test(
+                        model=classifiers[idx], dataloaders=dataloaders[idx]
+                    )[0]['test/acc_epoch']
+    
+                # Stampa le metriche
+                for key, acc in accuracy.items():
+                    print(f"{key}: {acc}")
+    
+                # Salva i risultati in un file polars (formato identico a quello della funzione main() iniziale)
+                pl.DataFrame(
+                    {
+                        'Dataset': config.dataset,
+                        'Seed': config.seed,
+                        'Channel Usage': config.channel_usage,
+                        'Antennas Transmitter': config.antennas_transmitter,
+                        'Antennas Receiver': config.antennas_receiver,
+                        'SNR': config.snr,
+                        'Accuracy': list(accuracy.values()),
+                        'Agent Model': [
+                            config.agents_models[int(a.split(' ')[0].split('-')[-1])]
+                            for a in accuracy
+                        ],
+                        'Base Station Model': config.base_station_model,
+                        'Case': f'{config.strategy} Semantic Baseline',
+                        'Latent Real Dim':Base.tx_size,
+                        'Latent Complex Dim':Base.tx_size/2
+                    }
+                ).write_parquet(
+                    RESULTS_PATH / f'{config.seed}_{config.channel_usage}_{config.antennas_transmitter}_{config.antennas_receiver}_{config.snr}.parquet'
+                )
+    
+                wandb.finish()
 
 if __name__ == '__main__':
     main()

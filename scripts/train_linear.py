@@ -71,7 +71,7 @@ def main(cfg: DictConfig) -> None:
     # Define some usefull paths
     CURRENT: Path = Path('.')
     MODEL_PATH: Path = CURRENT / 'models'
-    RESULTS_PATH: Path = CURRENT / 'results'
+    RESULTS_PATH: Path = CURRENT /'results'/ 'linear_model'
 
     # Create results directory
     RESULTS_PATH.mkdir(exist_ok=True)

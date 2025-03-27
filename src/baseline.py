@@ -58,10 +58,10 @@ config_dict = {
             "snr":20.0,
             "seed": 42,
             "dataset": 'cifar10',
-            "antennas_transmitter": 4,
-            "antennas_receiver": 4,
-            "base_station_model":"vit_tiny_patch16_224",
-            "agents_models": [
+            "antennas_transmitter": 8,
+            "antennas_receiver": 8,
+            "base_station_model":"vit_tiny_patch16_224", #:torch.Size([192, 42500])
+            "agents_models": [                       # dimensionality as (m x n)
                             "vit_small_patch16_224", #:torch.Size([384, 42500])
                             "vit_small_patch32_224", #:torch.Size([384, 42500])
                             #"vit_base_patch16_224",
@@ -72,7 +72,7 @@ config_dict = {
                             #"mobilenetv3_small_100",
                             #"efficientvit_m5.r224_in1k",
                             "levit_128s.fb_dist_in1k"], #torch.Size([384, 42500])
-            "channel_usage": 8,
+            "channel_usage": 12,
             "strategy": "FK"}
 
 wandb.init(project='Multi Agent MIMO Semantic Alignment', config=config_dict)
@@ -88,7 +88,7 @@ class LinearBaseline:
         antennas_receiver: int,
         strategy: str,
         device: str = 'cpu',
-        snr: float = 20.0,
+        snr: float = None,
         dual_var: float = None,
         channel_usage: int = None
     ):
@@ -99,6 +99,7 @@ class LinearBaseline:
         self.rx_latents: dict[id : torch.Tensor] = rx_latents
         self.tx_dim: int = tx_size
         self.strategy = strategy
+        self.snr = snr
         self.antennas_transmitter = antennas_transmitter
         self.antennas_receiver = antennas_receiver  # we are in the square case
         self.L, self.mean = [], []
@@ -149,10 +150,17 @@ class LinearBaseline:
         if self.strategy == 'TK':
             k = 2 * self.antennas_transmitter * self.channel_usage
             for id, tensor in self.tx_latents.items():
-                values,indexes = torch.topk(tensor.abs(), k, dim=1)
-                print(self.tx_latents[id].shape)
-                topk_latents = torch.gather(tensor, dim=1, index =indexes)
-                self.tx_latents[id] = topk_latents
+                _, indexes = torch.topk(tensor.T.abs(), k, dim=0)
+                #print(f"Indexes:{indexes.shape}")
+                k_latents = self.tx_latents[id].T[indexes, torch.arange(self.n)]
+                #print(f"K latents: {k_latents.shape}")
+                self.tx_latents[id] = k_latents.T
+                #print(f"tx latents: {self.tx_latents[id].shape}")
+
+                #values,indexes = torch.topk(tensor.abs(), k, dim=1)
+                ##print(self.tx_latents[id].shape)
+                #k_latents = torch.gather(tensor, dim=1, index =indexes)
+                #self.tx_latents[id] = k_latents
 
         assert self.strategy == 'TK' or self.strategy == 'FK', (
             f'Strategy {self.strategy} is not supported, choose TK or FK'
@@ -306,14 +314,14 @@ class LinearBaseline:
             idx: decompress_complex_tensor(self.rx_latents[idx])
             for idx in range(len(self.rx_latents))
         }
-        
+        # Perform alignment via linear transformation
         with torch.no_grad():
             for idx in range(len(self.rx_latents)):
                 self.W[idx] = torch.linalg.lstsq(
                     y_preds[idx].T, y_true[idx].T
                 ).solution.T
                 y_preds[idx] = self.W[idx] @ y_preds[idx]
-        print("Alignment performed before channel equalization;")
+        print("Alignment performed after channel equalization;")
 
         loss = [
             (torch.mean((y_preds[idx] - y_true[idx]) ** 2))
@@ -468,6 +476,7 @@ def main(config = config_dict) -> None:
                     for id, datamodule in datamodules.items()},
         tx_size=datamodules[0].train_data.z_tx.shape,
         strategy=config.strategy,
+        snr = config.snr,
         antennas_receiver=config.antennas_receiver,
         antennas_transmitter=config.antennas_transmitter,
         channel_usage=config.channel_usage  # Use the current channel usage value.
@@ -484,7 +493,6 @@ def main(config = config_dict) -> None:
                 for model, mse_value in zip(config.agents_models, mse)}
     mse_dict['Channel Usage'] = config.channel_usage  # Add the current channel usage.
     results.append(mse_dict)
-    # Create a DataFrame with all results.
     losses = pd.DataFrame(results)
     print(losses)
     
