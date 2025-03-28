@@ -13,8 +13,8 @@ from zipfile import ZipFile
 
 def download_zip_from_gdrive(
     id: str,
-    name: str = 'latents',
-    path: str = 'data',
+    name: str,
+    path: str,
 ) -> None:
     """A method to download a zip file containing all the needed data.
     The method will save the data in the data/<name>/ directory.
@@ -23,7 +23,7 @@ def download_zip_from_gdrive(
         id : str
             The gdown id of the zip file.
         name : str
-            The name of the subdirectory inside data. Default latents.
+            The name of the subdirectory inside data.
         path: str
             The path where to download the zip.
 
