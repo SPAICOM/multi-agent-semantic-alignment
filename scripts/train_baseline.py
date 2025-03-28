@@ -416,6 +416,7 @@ def main(cfg: DictConfig) -> None:
             'Antennas Receiver': cfg.communication.antennas_receiver,
             'SNR': cfg.communication.snr,
             'Accuracy': list(accuracy.values()),
+            'Loss': list(losses.values()),
             'Agent Model': [
                 agents[int(a.split(' ')[0].split('-')[-1])].model_name
                 for a in accuracy
@@ -424,11 +425,13 @@ def main(cfg: DictConfig) -> None:
             'Case': f'Baseline {cfg.base_station.strategy}',
             'Latent Real Dim': base_station.dim,
             'Latent Complex Dim': (base_station.dim + 1) // 2,
+            'Simulation': cfg.simulation,
         }
     ).write_parquet(
         RESULTS_PATH
-        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.base_station.strategy}.parquet'
+        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.base_station.strategy}_{cfg.simulation}.parquet'
     )
+    print(base_station.F)
 
     wandb.finish()
     return None
