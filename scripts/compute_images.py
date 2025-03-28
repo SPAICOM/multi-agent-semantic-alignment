@@ -154,7 +154,10 @@ def main() -> None:
     # ===================================================================================
     #                          Accuracy Vs Signal to Noise Ratio
     # ===================================================================================
-    filter = pl.col('Channel') == '4x4'
+    filter = (pl.col('Channel') == '4x4') & (
+        pl.col('Channel Usage').is_in([1, 4, 8])
+    )
+
     ch_usage = (df.filter(filter & (pl.col('Case').str.contains('Linear'))))[
         'Channel Usage'
     ].max()
