@@ -76,6 +76,7 @@ config_dict = {
             "strategy": "FK"}
 
 wandb.init(project='Multi Agent MIMO Semantic Alignment', config=config_dict)
+#wandb.init(project='Multi Agent MIMO Semantic Alignment', config=config_dict)
 
 
 class LinearBaseline:
@@ -87,7 +88,7 @@ class LinearBaseline:
         antennas_transmitter: int,
         antennas_receiver: int,
         strategy: str,
-        device: str = 'cpu',
+        device: str ,
         snr: float = None,
         dual_var: float = None,
         channel_usage: int = None
@@ -117,19 +118,10 @@ class LinearBaseline:
         }
         self.W = {
             idx: None for idx in range(len(rx_latents))
-        }  # alignment matrix
-        #self.alignment_matrix()
+        }  
+        # alignment matrix
+        self.indexes = {key:None for key in range(len(self.tx_latents))}
         self.prepare_latents()
-
-    def alignment_step(self):
-        with torch.no_grad():
-            for idx in range(len(self.rx_latents)):
-                self.W[idx] = torch.linalg.lstsq(
-                    self.tx_latents[idx], self.rx_latents[idx]
-                ).solution
-                self.tx_latents[idx] = self.W[idx] @ self.tx_latents[idx] 
-        print("Alignment performed before channel equalization;")
-        return None
 
     def prepare_latents(self):
         """Perform complex conversion and pre-withening.
@@ -150,16 +142,13 @@ class LinearBaseline:
         if self.strategy == 'TK':
             k = 2 * self.antennas_transmitter * self.channel_usage
             for id, tensor in self.tx_latents.items():
-                _, indexes = torch.topk(tensor.T.abs(), k, dim=0)
+                _, self.indexes[id] = torch.topk(tensor.T.abs(), k, dim=0)
                 #print(f"Indexes:{indexes.shape}")
-                k_latents = self.tx_latents[id].T[indexes, torch.arange(self.n)]
-                #print(f"K latents: {k_latents.shape}")
+                k_latents = self.tx_latents[id].T[self.indexes[id], torch.arange(self.n)]
                 self.tx_latents[id] = k_latents.T
                 #print(f"tx latents: {self.tx_latents[id].shape}")
-
-                #values,indexes = torch.topk(tensor.abs(), k, dim=1)
-                ##print(self.tx_latents[id].shape)
-                #k_latents = torch.gather(tensor, dim=1, index =indexes)
+                #values,self.indexes[id] = torch.topk(tensor.abs(), k, dim=1)
+                #k_latents = torch.gather(tensor, dim=1, index =self.indexes[id])
                 #self.tx_latents[id] = k_latents
 
         assert self.strategy == 'TK' or self.strategy == 'FK', (
@@ -219,7 +208,7 @@ class LinearBaseline:
     
     def F_step(self, channel: dict[int, torch.Tensor]):
         """Updates F using iterative method for λ."""
-        c = 1 / (self.n * len(self.rx_latents) * self.channel_usage)
+        c = (self.n * len(self.rx_latents) * self.channel_usage)
         
         A, B, C = 0, 0, 0
         for user in range(len(self.rx_latents)):
@@ -228,12 +217,12 @@ class LinearBaseline:
             B += self.tx_latents[user] @ self.tx_latents[user].H 
             C += GH.H @ (self.tx_latents[user] @ self.tx_latents[user].H) 
 
-        w = self.lmbd / c
+        w = self.lmbd * c
         self.F = torch.tensor(
             solve_sylvester(
                 A.numpy(),
                 (w * torch.linalg.inv(B)).numpy(),
-                (torch.linalg.inv(B) @ C).numpy()
+                (C @ torch.linalg.inv(B)).numpy()
             )
         ).to(self.device)
 
@@ -282,223 +271,209 @@ class LinearBaseline:
             idx: (self.G_l[idx] @ z[idx])
             for idx in range(len(self.rx_latents))
         }
-        # dewithening step
-        y_hat = {
-            idx: (self.L[idx] @ x_hat[idx]) + self.mean[idx]
-            for idx in range(len(self.rx_latents))
-        }
-        # pad and decompress symbols to get back to (n x d) original dimensions
-        y_pad = {
-            idx: torch.cat(
-                [
-                    tensor,
-                    torch.zeros(
-                        (
-                            self.tx_latents[idx].shape[0] - tensor.shape[0],
-                            self.n,
-                        ),
-                        dtype=torch.complex64,
-                    ),  # Complex padding
-                ],
-                dim=0,
-            )
-            for idx, tensor in y_hat.items()
-        }
-
+        
         y_preds = {
-            idx: decompress_complex_tensor(y_pad[idx])
+            idx: decompress_complex_tensor(x_hat[idx])
             for idx in range(len(self.rx_latents))
         }
+        #After decompression we perform zero padding in different manner wrt strategy of basleine.
+        #Padding is needed to reshape information in the desiderated agent shape (mxn)
+        output = {idx: torch.zeros(self.tx_size, self.n) for idx in y_preds.keys()}
+        if self.strategy == "FK":
+            for idx,tensor in output.items():
+                tensor[:y_preds[idx].shape[0],:]= y_preds[idx]
+        elif self.strategy == "TK":
+            for idx,tensor in output.items():
+                tensor[self.indexes[idx], torch.arange(self.n)]= y_preds[idx]
 
         y_true = {
             idx: decompress_complex_tensor(self.rx_latents[idx])
             for idx in range(len(self.rx_latents))
         }
-        # Perform alignment via linear transformation
+        # Perform alignment via linear transformation after decompression. So we align in the real domain.
         with torch.no_grad():
             for idx in range(len(self.rx_latents)):
                 self.W[idx] = torch.linalg.lstsq(
-                    y_preds[idx].T, y_true[idx].T
+                    output[idx].T, y_true[idx].T
                 ).solution.T
-                y_preds[idx] = self.W[idx] @ y_preds[idx]
+                output[idx] = self.W[idx] @ output[idx]
         print("Alignment performed after channel equalization;")
 
         loss = [
-            (torch.mean((y_preds[idx] - y_true[idx]) ** 2))
+            (torch.mean((output[idx] - y_true[idx]) ** 2))
             for idx in range(len(self.rx_latents))
         ]
-        return loss, y_preds
-
+        return loss, output
 # ============================================================
 #
 #                     MAIN DEFINITION
 #
 # ============================================================
-def main__() -> None:
-    """The main loop."""
-    seed_everything(config.seed, workers=True)
-    tabl = pd.DataFrame(
-        columns=['compression_factor', 'Trace', 'lambda_value', 'MSE']
-    )
-    # Channel Initialization
-    channel_matrixes: dict[int : torch.Tensor] = {
-        idx: complex_gaussian_matrix(
-            0,
-            1,
-            (
-                config.antennas_receiver,
-                config.antennas_transmitter,
-            ),
-        )
-        for idx, _ in enumerate(config.agents_models)
-    }
-
-    # Datamodules Initialization
-    datamodules = {
-        idx: DataModule(
-            dataset=config.dataset,
-            tx_enc=config.base_station_model,
-            rx_enc=agent_model,
-        )
-        for idx, agent_model in enumerate(config.agents_models)
-    }
-    for datamodule in datamodules.values():
-        datamodule.prepare_data()
-        datamodule.setup()
-        
-    Base = LinearBaseline(tx_latents=  {id : datamodule.train_data.z_tx 
-                                        for id,datamodule in datamodules.items()},
-
-                        rx_latents= {id : datamodule.train_data.z_rx 
-                                        for id,datamodule in datamodules.items()},
-                        tx_size =  datamodules[0].train_data.z_tx.shape,
-                        strategy= config.strategy,
-                        antennas_receiver= config.antennas_receiver,
-                        antennas_transmitter=config.antennas_transmitter,
-                        channel_usage = config.channel_usage)
-    
-    compression_factor = (Base.channel_usage*Base.antennas_transmitter/ (Base.tx_size/2) )
-    print(f"Compression Factor in this run is: {compression_factor}")
-    #-----------------------------------------------------
-    Base.equalization(channel_matrixes= channel_matrixes)
-
-    # mse: list of mse for each user language;
-    # y_preds: dictionary of {idx:y_hat} where y_hat should be used to the classification task
-    mse, y_preds = Base.evaluate(channel = channel_matrixes) 
-    #wandb.log({"mse_list": mse})
-    #-----------------------------------------------------
-    #tabl = [compression_factor, torch.trace(Base.F@Base.F.H).real, Base.lmbd.data]
-    losses = pd.DataFrame({'Usage':config.channel_usage,'Model': config.agents_models, 'MSE': mse})
-
-    print(losses)
-    #wandb.log({"table": losses})
-    #trace = torch.trace(Base.F @ Base.F.H).real.item() - 1
+#def main__() -> None:
+#    """The main loop."""
+#    seed_everything(config.seed, workers=True)
+#    tabl = pd.DataFrame(
+#        columns=['compression_factor', 'Trace', 'lambda_value', 'MSE']
+#    )
+#    # Channel Initialization
+#    channel_matrixes: dict[int : torch.Tensor] = {
+#        idx: complex_gaussian_matrix(
+#            0,
+#            1,
+#            (
+#                config.antennas_receiver,
+#                config.antennas_transmitter,
+#            ),
+#        )
+#        for idx, _ in enumerate(config.agents_models)
+#    }
 #
-    #def f(lam, trace_val):
-    #    return lam * (trace_val)
+#    # Datamodules Initialization
+#    datamodules = {
+#        idx: DataModule(
+#            dataset=config.dataset,
+#            tx_enc=config.base_station_model,
+#            rx_enc=agent_model,
+#        )
+#        for idx, agent_model in enumerate(config.agents_models)
+#    }
+#    for datamodule in datamodules.values():
+#        datamodule.prepare_data()
+#        datamodule.setup()
+#        
+#    Base = LinearBaseline(tx_latents=  {id : datamodule.train_data.z_tx 
+#                                        for id,datamodule in datamodules.items()},
 #
-    #lambdas = np.logspace(-10, 1, num=200)
-    #f_values = f(lambdas, trace)
+#                        rx_latents= {id : datamodule.train_data.z_rx 
+#                                        for id,datamodule in datamodules.items()},
+#                        tx_size =  datamodules[0].train_data.z_tx.shape,
+#                        strategy= config.strategy,
+#                        antennas_receiver= config.antennas_receiver,
+#                        antennas_transmitter=config.antennas_transmitter,
+#                        channel_usage = config.channel_usage)
+#    
+#    compression_factor = (Base.channel_usage*Base.antennas_transmitter/ (Base.tx_size/2) )
+#    print(f"Compression Factor in this run is: {compression_factor}")
+#    #-----------------------------------------------------
+#    Base.equalization(channel_matrixes= channel_matrixes)
 #
-    #lambda_vals = np.logspace(-6, 6, num=200)
-    #trace_vals = []
+#    # mse: list of mse for each user language;
+#    # y_preds: dictionary of {idx:y_hat} where y_hat should be used to the classification task
+#    mse, y_preds = Base.evaluate(channel = channel_matrixes) 
+#    #wandb.log({"mse_list": mse})
+#    #-----------------------------------------------------
+#    #tabl = [compression_factor, torch.trace(Base.F@Base.F.H).real, Base.lmbd.data]
+#    losses = pd.DataFrame({'Usage':config.channel_usage,'Model': config.agents_models, 'MSE': mse})
 #
-    ## Loop over the lambda values and compute trace values
-    #for lam in lambda_vals:
-    #    Base.lmbd = lam  # update the lambda in your instance
-    #    Base.F_step(channel_matrixes)  # update F based on the current lambda
-    #    current_trace = torch.trace(Base.F @ Base.F.H).item()  # compute trace
-    #    trace_vals.append(current_trace)
+#    print(losses)
+#    #wandb.log({"table": losses})
+#    #trace = torch.trace(Base.F @ Base.F.H).real.item() - 1
+##
+#    #def f(lam, trace_val):
+#    #    return lam * (trace_val)
+##
+#    #lambdas = np.logspace(-10, 1, num=200)
+#    #f_values = f(lambdas, trace)
+##
+#    #lambda_vals = np.logspace(-6, 6, num=200)
+#    #trace_vals = []
+##
+#    ## Loop over the lambda values and compute trace values
+#    #for lam in lambda_vals:
+#    #    Base.lmbd = lam  # update the lambda in your instance
+#    #    Base.F_step(channel_matrixes)  # update F based on the current lambda
+#    #    current_trace = torch.trace(Base.F @ Base.F.H).item()  # compute trace
+#    #    trace_vals.append(current_trace)
+##
+#    ## Create a figure with 1 row and 2 columns of subplots
+#    #fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+##
+#    ## First subplot: Plot f(lambda) vs lambda
+#    #axes[0].semilogx(lambdas, f_values, label=r'$f(\lambda) = \lambda\,(\mathrm{trace}(F F^H)-1)$')
+#    #axes[0].set_xlabel(r'$\lambda$', fontsize=12)
+#    #axes[0].set_ylabel('f(lambda)', fontsize=12)
+#    #axes[0].set_title('Plot of $f(\\lambda)$ vs $\\lambda$', fontsize=14)
+#    #axes[0].legend()
+#    #axes[0].grid(True, which="both", ls="--", linewidth=0.5)
+##
+#    ## Second subplot: Plot trace(F @ F.H) vs lambda
+#    #axes[1].semilogx(lambda_vals, trace_vals, label=r'$\operatorname{trace}(F F^H)$')
+#    #axes[1].set_xlabel(r'$\lambda$', fontsize=12)
+#    #axes[1].set_ylabel(r'$\operatorname{trace}(F F^H)$', fontsize=12)
+#    #axes[1].set_title('Trace of $F F^H$ vs. $\lambda$', fontsize=14)
+#    #axes[1].legend()
+#    #axes[1].grid(True, which="both", ls="--", linewidth=0.5)
 #
-    ## Create a figure with 1 row and 2 columns of subplots
-    #fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+#    #plt.tight_layout()
+#    #wandb.log({"plot": wandb.Image(fig)})
+#    #plt.show()
+#    return None
 #
-    ## First subplot: Plot f(lambda) vs lambda
-    #axes[0].semilogx(lambdas, f_values, label=r'$f(\lambda) = \lambda\,(\mathrm{trace}(F F^H)-1)$')
-    #axes[0].set_xlabel(r'$\lambda$', fontsize=12)
-    #axes[0].set_ylabel('f(lambda)', fontsize=12)
-    #axes[0].set_title('Plot of $f(\\lambda)$ vs $\\lambda$', fontsize=14)
-    #axes[0].legend()
-    #axes[0].grid(True, which="both", ls="--", linewidth=0.5)
 #
-    ## Second subplot: Plot trace(F @ F.H) vs lambda
-    #axes[1].semilogx(lambda_vals, trace_vals, label=r'$\operatorname{trace}(F F^H)$')
-    #axes[1].set_xlabel(r'$\lambda$', fontsize=12)
-    #axes[1].set_ylabel(r'$\operatorname{trace}(F F^H)$', fontsize=12)
-    #axes[1].set_title('Trace of $F F^H$ vs. $\lambda$', fontsize=14)
-    #axes[1].legend()
-    #axes[1].grid(True, which="both", ls="--", linewidth=0.5)
-
-    #plt.tight_layout()
-    #wandb.log({"plot": wandb.Image(fig)})
-    #plt.show()
-    return None
-
-
-def main(config = config_dict) -> None:
-    """The main loop."""
-    config = SimpleNamespace(**config_dict)
-    seed_everything(config.seed, workers=True)
-    
-    # Channel Initialization
-    channel_matrixes: dict[int, torch.Tensor] = {
-        idx: complex_gaussian_matrix(
-            0,
-            1,
-            (
-                config.antennas_receiver,
-                config.antennas_transmitter,
-            ),
-        )
-        for idx, _ in enumerate(config.agents_models)
-    }
-    
-    # Datamodules Initialization
-    datamodules = {
-        idx: DataModule(
-            dataset=config.dataset,
-            tx_enc=config.base_station_model,
-            rx_enc=agent_model,
-        )
-        for idx, agent_model in enumerate(config.agents_models)
-    }
-    
-    for datamodule in datamodules.values():
-        datamodule.prepare_data()
-        datamodule.setup()
-    
-    # List to collect results for each channel usage value.
-    results = []
-    Base = LinearBaseline(
-        tx_latents={id: datamodule.train_data.z_tx 
-                    for id, datamodule in datamodules.items()},
-        rx_latents={id: datamodule.train_data.z_rx 
-                    for id, datamodule in datamodules.items()},
-        tx_size=datamodules[0].train_data.z_tx.shape,
-        strategy=config.strategy,
-        snr = config.snr,
-        antennas_receiver=config.antennas_receiver,
-        antennas_transmitter=config.antennas_transmitter,
-        channel_usage=config.channel_usage  # Use the current channel usage value.
-    )
-    
-    # Calculate compression factor.
-    compression_factor = (config.channel_usage  / (Base.tx_size)/2)
-    #print(f"Compression Factor in this run with channel usage {usage} is: {compression_factor}")       
-    Base.equalization(channel_matrixes=channel_matrixes)
-    # mse: list of mse for each user language;
-    # y_preds: dictionary of {idx:y_hat} where y_hat should be used to the classification task
-    mse, y_preds = Base.evaluate(channel=channel_matrixes) 
-    mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
-                for model, mse_value in zip(config.agents_models, mse)}
-    mse_dict['Channel Usage'] = config.channel_usage  # Add the current channel usage.
-    results.append(mse_dict)
-    losses = pd.DataFrame(results)
-    print(losses)
-    
+#def main(config = config_dict) -> None:
+#    """The main loop."""
+#    config = SimpleNamespace(**config_dict)
+#    seed_everything(config.seed, workers=True)
+#    
+#    # Channel Initialization
+#    channel_matrixes: dict[int, torch.Tensor] = {
+#        idx: complex_gaussian_matrix(
+#            0,
+#            1,
+#            (
+#                config.antennas_receiver,
+#                config.antennas_transmitter,
+#            ),
+#        )
+#        for idx, _ in enumerate(config.agents_models)
+#    }
+#    
+#    # Datamodules Initialization
+#    datamodules = {
+#        idx: DataModule(
+#            dataset=config.dataset,
+#            tx_enc=config.base_station_model,
+#            rx_enc=agent_model,
+#        )
+#        for idx, agent_model in enumerate(config.agents_models)
+#    }
+#    
+#    for datamodule in datamodules.values():
+#        datamodule.prepare_data()
+#        datamodule.setup()
+#    
+#    # List to collect results for each channel usage value.
+#    results = []
+#    Base = LinearBaseline(
+#        tx_latents={id: datamodule.train_data.z_tx 
+#                    for id, datamodule in datamodules.items()},
+#        rx_latents={id: datamodule.train_data.z_rx 
+#                    for id, datamodule in datamodules.items()},
+#        tx_size=datamodules[0].train_data.z_tx.shape,
+#        strategy=config.strategy,
+#        snr = config.snr,
+#        antennas_receiver=config.antennas_receiver,
+#        antennas_transmitter=config.antennas_transmitter,
+#        channel_usage=config.channel_usage  # Use the current channel usage value.
+#    )
+#    
+#    # Calculate compression factor.
+#    compression_factor = (config.channel_usage  / (Base.tx_size)/2)
+#    #print(f"Compression Factor in this run with channel usage {usage} is: {compression_factor}")       
+#    Base.equalization(channel_matrixes=channel_matrixes)
+#    # mse: list of mse for each user language;
+#    # y_preds: dictionary of {idx:y_hat} where y_hat should be used to the classification task
+#    mse, y_preds = Base.evaluate(channel=channel_matrixes) 
+#    mse_dict = {model: mse_value.item() if hasattr(mse_value, "item") else mse_value
+#                for model, mse_value in zip(config.agents_models, mse)}
+#    mse_dict['Channel Usage'] = config.channel_usage  # Add the current channel usage.
+#    results.append(mse_dict)
+#    losses = pd.DataFrame(results)
+#    print(losses)
+#    
 
 
 if __name__ == '__main__':
-    main()
+    print()
 
 #wandb.finish()
