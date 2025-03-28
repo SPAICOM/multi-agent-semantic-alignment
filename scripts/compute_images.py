@@ -102,7 +102,7 @@ def main() -> None:
                 ]
             )
             .agg(pl.col('Accuracy').mean())
-            .sort('Antennas Transmitter')
+            .sort(['Case', 'Antennas Transmitter'])
         )
         .rename(
             {
@@ -121,8 +121,10 @@ def main() -> None:
     # ===================================================================================
     #                          Accuracy Vs Compression Factor
     # ===================================================================================
+    filter = pl.col('SNR') == 20.0
+
     ax = sns.lineplot(
-        df.filter(pl.col('SNR') == 20.0),
+        df.filter(filter),
         x='Compression Factor',
         y='Accuracy',
         style='Channel',
@@ -131,12 +133,10 @@ def main() -> None:
     )
     sns.move_legend(
         ax,
-        'upper left',
-        # ncol=2,
-        title='Legend',
+        'upper center',
+        ncol=2,
         frameon=True,
-        # bbox_to_anchor=(0.5, 1.4),
-        bbox_to_anchor=(1, 1),
+        bbox_to_anchor=(0.5, 1.3),
     )
     plt.xlabel(r'Compression Factor $\zeta$ (\%)')
     plt.savefig(
@@ -154,8 +154,13 @@ def main() -> None:
     # ===================================================================================
     #                          Accuracy Vs Signal to Noise Ratio
     # ===================================================================================
+    filter = pl.col('Channel') == '4x4'
+    ch_usage = (df.filter(filter & (pl.col('Case').str.contains('Linear'))))[
+        'Channel Usage'
+    ].max()
+
     ax = sns.lineplot(
-        df.filter(pl.col('Channel') == '8x8'),
+        df.filter(filter & (pl.col('Channel Usage') <= ch_usage)),
         x='SNR',
         y='Accuracy',
         hue='Case',
@@ -164,10 +169,10 @@ def main() -> None:
     )
     sns.move_legend(
         ax,
-        'upper left',
-        title='Legend',
+        'upper center',
+        ncol=2,
         frameon=True,
-        bbox_to_anchor=(1, 1),
+        bbox_to_anchor=(0.5, 1.3),
     )
     plt.savefig(
         str(IMG_PATH / 'AccuracyVsSNR.pdf'),
