@@ -824,17 +824,20 @@ class BaseStationBaseline(BaseStation):
                 lmb = max(0, lmb)
             return lmb
 
+        # Aggregate the single agents components
         A = sum_tensors(list(self.__F_A.values()))
         B = torch.linalg.inv(sum_tensors(list(self.__F_B.values())))
         C = sum_tensors(list(self.__F_C.values())) @ B
 
+        # Retain the global F when lmb = 0, the simple case.
         self.F = torch.linalg.inv(A) @ C @ B
 
+        # Check if the constraint is respected
         if self.get_trace() - self.px_cost > 0:
+            # Constraint not respected, then we proceed finding the right lambda
             c_repr = self.channel_usage * sum(
                 [d['n'] for d in self.agents_pilots.values()]
             )
-
             for i in range(self.iterations):
                 self.F = torch.tensor(
                     solve_sylvester(
@@ -844,9 +847,11 @@ class BaseStationBaseline(BaseStation):
                     )
                 ).to(self.device)
 
+                # Update lambda
                 if i < self.iterations:
                     self.lmb = lmb_update(self.lmb)
         else:
+            # Constraint respected, set lambda to zero
             self.lmb = 0
         return None
 
@@ -954,9 +959,6 @@ class BaseStationBaseline(BaseStation):
                 torch.eye(self.channel_usage, dtype=torch.complex64),
                 channel_matrix,
             ).to(self.device)
-
-            # Fix the message msg1 to consider also the channel matrix
-            received['msg1'] = received['msg1'] @ self.channel_matrixes[idx]
 
         # Compress the pilots & save the pilots
         self.agents_pilots[idx] = self.__compression(pilots)
@@ -1079,7 +1081,7 @@ class AgentBaseline(Agent):
         # Set Variables
         self.pilot_dim, self.n_pilots = self.pilots.shape
         self.bs_pilots: torch.Tensor = bs_pilots
-        self.snr /= self.channel_usage
+        self.snr *= self.channel_usage
 
         # Prepare the A matrix for the alignment
         self.A: torch.Tensor = None
@@ -1205,9 +1207,7 @@ class AgentBaseline(Agent):
         """
         return {
             'idx': self.id,
-            'msg1': self.G @ self.channel_matrix
-            if channel_awareness
-            else self.G,
+            'msg1': self.G @ self.channel_matrix,
         }
 
     def decode(
