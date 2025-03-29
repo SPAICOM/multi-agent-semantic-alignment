@@ -1,0 +1,39 @@
+defaults:
+  - _self_
+
+seed: 42
+device: cpu
+iterations: 30
+simulation: heterogeneous
+
+datamodule:
+  dataset: cifar10
+  batch_size: 512
+
+metrics:
+  train_acc: false
+  val_acc: false
+
+communication:
+  snr: 20.0
+  square: true
+  channel_usage: 4
+  antennas_receiver: 4
+  antennas_transmitter: 4
+  
+base_station:
+  model: vit_tiny_patch16_224
+  rho: 1
+  px_cost: 1.0
+  channel_aware: true
+
+agents:
+  privacy: true
+  models:
+    - vit_small_patch16_224
+    - vit_base_patch16_224
+    - mobilenetv3_small_075
+    - levit_128s.fb_dist_in1k
+
+wandb:
+  project: multi_agent_semantic_alignment__linear_model
