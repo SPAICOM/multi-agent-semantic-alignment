@@ -202,7 +202,12 @@ def main() -> None:
         pl.col('Simulation') == 'heterogeneous'
     )
 
-    plot_df = df.filter(filter).drop('Case').rename({'Simulation': 'Case'})
+    plot_df = (
+        df.filter(filter)
+        .drop('Case')
+        .rename({'Simulation': 'Case'})
+        .sort(['Case'], descending=True)
+    )
 
     ax = sns.lineplot(
         plot_df,
