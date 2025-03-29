@@ -130,7 +130,6 @@ def main() -> None:
     #                          Accuracy Vs Compression Factor
     # ===================================================================================
     filter = pl.col('Simulation') == 'compr_fact'
-    # pl.col('SNR') == 20.0
 
     ax = sns.lineplot(
         df.filter(filter),
@@ -163,11 +162,7 @@ def main() -> None:
     # ===================================================================================
     #                          Accuracy Vs Signal to Noise Ratio
     # ===================================================================================
-    filter = (
-        pl.col('Simulation') == 'snr'
-        # pl.col('Channel') == '4x4') & (
-        # pl.col('Channel Usage').is_in([1, 4, 8])
-    )
+    filter = pl.col('Simulation') == 'snr'
 
     ch_usage = (df.filter(filter & (pl.col('Case').str.contains('Linear'))))[
         'Channel Usage'
@@ -201,26 +196,13 @@ def main() -> None:
     plt.cla()
 
     # ===================================================================================
-    #                          MSE Homogeneous Vs Heterogeneous
+    #                          MSE & Accuracy - Homogeneous Vs Heterogeneous
     # ===================================================================================
     filter = (pl.col('Simulation') == 'homogeneous') | (
         pl.col('Simulation') == 'heterogeneous'
     )
 
-    plot_df = (
-        df.filter(filter)
-        .group_by(
-            [
-                'Simulation',
-                'Channel Usage',
-                'Compression Factor',
-                'Seed',
-                'SNR',
-            ]
-        )
-        .agg(pl.col('Loss').sum())
-        .rename({'Simulation': 'Case'})
-    )
+    plot_df = df.filter(filter).drop('Case').rename({'Simulation': 'Case'})
 
     ax = sns.lineplot(
         plot_df,
@@ -246,6 +228,34 @@ def main() -> None:
     )
     plt.savefig(
         str(IMG_PATH / 'AlignmentStruggle.png'),
+        bbox_inches='tight',
+    )
+    plt.clf()
+    plt.cla()
+
+    ax = sns.lineplot(
+        plot_df,
+        x='Compression Factor',
+        y='Accuracy',
+        style='Case',
+        hue='Case',
+        markers=True,
+    )
+    sns.move_legend(
+        ax,
+        'upper center',
+        ncol=2,
+        frameon=True,
+        bbox_to_anchor=(0.5, 1.2),
+    )
+    plt.xlabel(r'Compression Factor $\zeta$ (\%)')
+    plt.savefig(
+        str(IMG_PATH / 'AccuracyGroups.pdf'),
+        format='pdf',
+        bbox_inches='tight',
+    )
+    plt.savefig(
+        str(IMG_PATH / 'AccuracyGroups.png'),
         bbox_inches='tight',
     )
     plt.clf()
