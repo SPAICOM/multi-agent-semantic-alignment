@@ -500,12 +500,12 @@ class Agent:
         self.pilot_dim, self.n_pilots = self.pilots.shape
 
         if self.snr:
-            self.sigma = sigma_given_snr(
-                self.snr, torch.ones(1) / math.sqrt(self.antennas_receiver)
+            self.sigma = (
+                sigma_given_snr(
+                    self.snr, torch.ones(1) / math.sqrt(self.antennas_receiver)
+                )
+                / self.channel_usage
             )
-
-            if self.channel_usage > 0:
-                self.sigma /= self.channel_usage
         else:
             self.sigma = 0
 
@@ -718,18 +718,16 @@ class BaseStationBaseline(BaseStation):
         iterations: int = 30,
         device: str = 'cpu',
     ) -> None:
-        super().__init__(
-            model=model,
-            dim=dim,
-            antennas_transmitter=antennas_transmitter,
-            channel_usage=channel_usage,
-            px_cost=px_cost,
-            device=device,
-        )
         assert strategy in ['FK', 'Top-K'], (
             f'The passed strategy {strategy} is not supported.'
         )
 
+        self.model: str = model
+        self.dim: int = dim
+        self.antennas_transmitter: int = antennas_transmitter
+        self.channel_usage: int = channel_usage
+        self.px_cost: float = px_cost
+        self.device: str = device
         self.lmb: float = 0
         self.lr: float = lr
         self.strategy: str = strategy
@@ -737,7 +735,14 @@ class BaseStationBaseline(BaseStation):
         self.__F_A: dict[int, torch.Tensor] = {}
         self.__F_B: dict[int, torch.Tensor] = {}
         self.__F_C: dict[int, torch.Tensor] = {}
+
+        # Attributes Initialization
+        self.L: dict[int, torch.Tensor] = {}
+        self.mean: dict[int, float] = {}
+        self.agents_id: set[int] = set()
         self.agents_pilots: dict[int, dict[str, torch.Tensor | int]] = {}
+        self.msgs: defaultdict = defaultdict(int)
+        self.channel_matrixes: dict[int, torch.Tensor] = {}
 
         # Initialize Global F at random and locals
         self.F = torch.randn(
@@ -748,11 +753,6 @@ class BaseStationBaseline(BaseStation):
             dtype=torch.complex64,
         ).to(self.device)
 
-        del self.L
-        del self.mean
-        del self.rho
-        del self.U
-        del self.Z
         return None
 
     def __F_local_step(
@@ -817,11 +817,13 @@ class BaseStationBaseline(BaseStation):
                     The updated lmb.
             """
             cnst_viol = self.get_trace() - self.px_cost
+            # print(cnst_viol, self.get_trace())
 
             if cnst_viol > 0:
                 lmb += self.lr * cnst_viol
-            else:
                 lmb = max(0, lmb)
+            else:
+                lmb = 0
             return lmb
 
         # Aggregate the single agents components
@@ -829,16 +831,13 @@ class BaseStationBaseline(BaseStation):
         B = torch.linalg.inv(sum_tensors(list(self.__F_B.values())))
         C = sum_tensors(list(self.__F_C.values())) @ B
 
-        # Retain the global F when lmb = 0, the simple case.
-        self.F = torch.linalg.inv(A) @ C @ B
-
         # Check if the constraint is respected
         if self.get_trace() - self.px_cost > 0:
             # Constraint not respected, then we proceed finding the right lambda
-            c_repr = self.channel_usage * sum(
-                [d['n'] for d in self.agents_pilots.values()]
-            )
+            c_repr = sum([d['n'] for d in self.agents_pilots.values()])
             for i in range(self.iterations):
+                self.lmb = lmb_update(self.lmb)
+
                 self.F = torch.tensor(
                     solve_sylvester(
                         A.cpu().numpy(),
@@ -846,13 +845,14 @@ class BaseStationBaseline(BaseStation):
                         C.cpu().numpy(),
                     )
                 ).to(self.device)
+                # print(self.lmb)
 
-                # Update lambda
-                if i < self.iterations:
-                    self.lmb = lmb_update(self.lmb)
         else:
             # Constraint respected, set lambda to zero
             self.lmb = 0
+
+        self.normalizer = math.sqrt(self.get_trace())
+        self.F = self.F / self.normalizer
         return None
 
     def step(self) -> None:
@@ -963,6 +963,11 @@ class BaseStationBaseline(BaseStation):
         # Compress the pilots & save the pilots
         self.agents_pilots[idx] = self.__compression(pilots)
 
+        # Learn L and the mean for the Prewhitening
+        self.agents_pilots[idx]['pilots'], self.L[idx], self.mean[idx] = (
+            prewhiten(self.agents_pilots[idx]['pilots'], device=self.device)
+        )
+
         # Compute the local F step
         self.__F_local_step(
             msg={
@@ -974,7 +979,7 @@ class BaseStationBaseline(BaseStation):
         # Update the number of messages used for handshaking
         self.msgs['handshaking'] += c
 
-        return self.agents_pilots[idx]
+        return None
 
     def group_cast(self):
         pass
@@ -1011,6 +1016,9 @@ class BaseStationBaseline(BaseStation):
 
         # Updating the number of trasmitting messages
         self.msgs['transmitting'] += 1
+
+        # Normalize trace
+        msg['normalizer'] = self.normalizer
 
         return msg
 
@@ -1063,40 +1071,37 @@ class AgentBaseline(Agent):
         snr: float = 20.0,
         device: str = 'cpu',
     ) -> None:
-        super().__init__(
-            id=id,
-            pilots=pilots,
-            model_name=model_name,
-            antennas_receiver=antennas_receiver,
-            channel_matrix=channel_matrix,
-            channel_usage=channel_usage,
-            snr=snr,
-            device=device,
-        )
-        self.pilots, self.L, self.mean = prewhiten(
-            pilots.T,
-            device=self.device,
-        )
-
         # Set Variables
+        self.id = id
+        self.antennas_receiver: int = antennas_receiver
+        self.pilots = pilots.T
         self.pilot_dim, self.n_pilots = self.pilots.shape
         self.bs_pilots: torch.Tensor = bs_pilots
-        self.snr *= self.channel_usage
+        self.channel_matrix: torch.Tensor = torch.kron(
+            torch.eye(channel_usage, dtype=torch.complex64), channel_matrix
+        ).to(device)
+        self.channel_usage: int = channel_usage
+        self.model_name: str = model_name
+        self.snr: float = snr
+        self.device: str = device
+
+        # Get sigma
+        if self.snr:
+            self.sigma = (
+                sigma_given_snr(
+                    self.snr, torch.ones(1) / math.sqrt(self.antennas_receiver)
+                )
+                / self.channel_usage
+            )
+        else:
+            self.sigma = 0
 
         # Prepare the A matrix for the alignment
         self.A: torch.Tensor = None
         self.__alignment_step(input=bs_pilots, output=pilots)
 
-        # To ensure that the G step is calculated on the single channel matrix
-        self.channel_matrix = channel_matrix
-
         # Compute the G step.
         self.__G_step()
-
-        # Apply the channel usage to the channel matrix
-        self.channel_matrix: torch.Tensor = torch.kron(
-            torch.eye(channel_usage, dtype=torch.complex64), channel_matrix
-        ).to(device)
 
         assert self.G.shape == self.channel_matrix.shape, (
             'Channel and G matrix are not of the same dimension.'
@@ -1117,7 +1122,7 @@ class AgentBaseline(Agent):
             output : torch.Tensor
                 The output.
         """
-        received, size, sent_features, indexes, strategy, n = msg.values()
+        received, size, sent_features, indexes, strategy, n, _ = msg.values()
 
         # Decompress the transmitted signal
         received = decompress_complex_tensor(received)
@@ -1157,16 +1162,12 @@ class AgentBaseline(Agent):
 
         if self.snr:
             self.G = (
-                B.H @ torch.linalg.inv(B @ B.H + (1 / self.snr) * (1 + 1j))
-                # * torch.linalg.norm(Vt.H)
+                B.H
+                @ torch.linalg.inv(B @ B.H + (1 / self.snr) * (1 + 1j))
+                * torch.linalg.norm(Vt.H)
             )
         else:
-            self.G = torch.linalg.inv(S) @ U.H  # * torch.linalg.norm(Vt.H)
-
-        # Apply channel usage to G
-        self.G = torch.kron(
-            torch.eye(self.channel_usage, dtype=torch.complex64), self.G
-        )
+            self.G = torch.linalg.inv(S) @ U.H * torch.linalg.norm(Vt.H)
         return None
 
     def __alignment_step(
@@ -1190,6 +1191,30 @@ class AgentBaseline(Agent):
             output,
         ).solution.T
         return None
+
+    # def alignment_step(
+    #     self,
+    #     input: torch.Tensor,
+    #     channel_awareness: bool,
+    #     # output: torch.Tensor,
+    # ) -> None:
+    #     """The alignment step to align the semantic pilots.
+
+    #     Args:
+    #         input : torch.Tensor
+    #             The input tensor which we want to align.
+    #         output : torch.Tensor
+    #             The output tensor which is the tensor we want to align to.
+
+    #     Returns:
+    #         None
+    #     """
+    #     input = self.decode(input, channel_awareness=channel_awareness).T
+    #     self.A = torch.linalg.lstsq(
+    #         input.T,
+    #         self.pilots.T,
+    #     ).solution.T
+    #     return None
 
     def step(
         self,
@@ -1243,7 +1268,7 @@ class AgentBaseline(Agent):
             msg['pilots'] += w
 
         # Decode the message
-        msg['pilots'] = self.G @ msg['pilots']
+        msg['pilots'] = (self.G * msg['normalizer']) @ msg['pilots']
 
         # Clean the message
         msg = self.__decompression(msg)
@@ -1387,13 +1412,15 @@ def main() -> None:
             received=a_msg,
             channel_matrix=channel_matrix if channel_aware else None,
         )
+
     base_station.step()
-    msg = base_station.transmit_to_agent(agent_id, tx_pilots.T)
-    received = (
-        agents[agent_id].decode(msg, base_station.is_channel_aware(agent_id)).T
-    )
-    print(agents[agent_id].eval(received.T, agents[agent_id].pilots.T))
-    print(base_station.get_trace())
+    # msg = base_station.transmit_to_agent(agent_id, tx_pilots.T)
+    # received = (
+    #     agents[agent_id].decode(msg, base_station.is_channel_aware(agent_id)).T
+    # )
+    # print(agents[agent_id].eval(received.T, agents[agent_id].pilots.T))
+    # print(base_station.get_trace())
+    # print(base_station.F)
     print('[Passed]')
 
     return None

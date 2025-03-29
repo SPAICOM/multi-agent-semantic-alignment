@@ -431,7 +431,6 @@ def main(cfg: DictConfig) -> None:
         RESULTS_PATH
         / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.base_station.strategy}_{cfg.simulation}.parquet'
     )
-    print(base_station.F)
 
     wandb.finish()
     return None
