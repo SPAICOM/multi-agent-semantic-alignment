@@ -36,6 +36,9 @@ def main() -> None:
     # Create image Path
     IMG_PATH.mkdir(exist_ok=True)
 
+    # Set sns style
+    sns.set_style('whitegrid')
+
     # Set style
     plt.rcParams.update(
         {
@@ -126,6 +129,9 @@ def main() -> None:
         )
     )
 
+    # Define ticks
+    ticks = list(map(int, df['Compression Factor'].unique().to_list()))
+
     # ===================================================================================
     #                          Accuracy Vs Compression Factor
     # ===================================================================================
@@ -147,6 +153,7 @@ def main() -> None:
         bbox_to_anchor=(0.5, 1.3),
     )
     plt.xlabel(r'Compression Factor $\zeta$ (\%)')
+    plt.xticks(ticks, labels=ticks)
     plt.savefig(
         str(IMG_PATH / 'AccuracyVsCompression_factor.pdf'),
         format='pdf',
@@ -226,6 +233,7 @@ def main() -> None:
     )
     plt.xlabel(r'Compression Factor $\zeta$ (\%)')
     plt.ylabel('MSE')
+    plt.xticks(ticks, labels=ticks)
     plt.savefig(
         str(IMG_PATH / 'AlignmentStruggle.pdf'),
         format='pdf',
@@ -254,6 +262,7 @@ def main() -> None:
         bbox_to_anchor=(0.5, 1.2),
     )
     plt.xlabel(r'Compression Factor $\zeta$ (\%)')
+    plt.xticks(ticks, labels=ticks)
     plt.savefig(
         str(IMG_PATH / 'AccuracyGroups.pdf'),
         format='pdf',
