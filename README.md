@@ -1,6 +1,6 @@
 # Federated Latent Space Alignment for Multi-user Semantic Communications
 
-> [!TIP] Abstract
+> [!TIP]
 > Semantic communications focus on understanding the meaning behind transmitted data, ensuring effective task execution and seamless information exchange. However, when AI-native devices employ different internal representations (e.g., latent spaces), semantic mismatches can arise, hindering mutual comprehension. This paper introduces a novel approach to mitigating latent space misalignment in multi-agent AI-native semantic communications. In a downlink scenario, we consider an access point (AP) communicating with multiple users to accomplish a specific AI-driven task. Our method implements a protocol that shares semantic encoder at the AP and local semantic equalizers at user devices, fostering mutual understanding and task-oriented communication while considering power and complexity constraints. To achieve this, we employ a federated optimization for the decentralized training of semantic encoders and equalizers. Numerical results validate the proposed approach in goal-oriented semantic communication, revealing key trade-offs among accuracy, communication overhead, complexity, and the semantic proximity of AI-native communication devices.
 
 ## Simulations
