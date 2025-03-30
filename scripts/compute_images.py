@@ -36,6 +36,9 @@ def main() -> None:
     # Create image Path
     IMG_PATH.mkdir(exist_ok=True)
 
+    # Set sns style
+    sns.set_style('whitegrid')
+
     # Set style
     plt.rcParams.update(
         {
@@ -74,9 +77,13 @@ def main() -> None:
                 'Compression Factor',
                 'Seed',
                 'SNR',
+                'Simulation',
             ]
         )
-        .agg(pl.col('Accuracy').mean())
+        .agg(
+            pl.col('Accuracy').mean(),
+            pl.col('Loss').sum(),
+        )
         .sort('Antennas Transmitter')
         .vstack(
             pl.read_parquet(RESULTS_PATH / 'baseline/*.parquet')
@@ -99,9 +106,13 @@ def main() -> None:
                     'Compression Factor',
                     'Seed',
                     'SNR',
+                    'Simulation',
                 ]
             )
-            .agg(pl.col('Accuracy').mean())
+            .agg(
+                pl.col('Accuracy').mean(),
+                pl.col('Loss').sum(),
+            )
             .sort(['Case', 'Antennas Transmitter'])
         )
         .rename(
@@ -118,10 +129,13 @@ def main() -> None:
         )
     )
 
+    # Define ticks
+    ticks = list(map(int, df['Compression Factor'].unique().to_list()))
+
     # ===================================================================================
     #                          Accuracy Vs Compression Factor
     # ===================================================================================
-    filter = pl.col('SNR') == 20.0
+    filter = pl.col('Simulation') == 'compr_fact'
 
     ax = sns.lineplot(
         df.filter(filter),
@@ -139,6 +153,7 @@ def main() -> None:
         bbox_to_anchor=(0.5, 1.3),
     )
     plt.xlabel(r'Compression Factor $\zeta$ (\%)')
+    plt.xticks(ticks, labels=ticks)
     plt.savefig(
         str(IMG_PATH / 'AccuracyVsCompression_factor.pdf'),
         format='pdf',
@@ -152,10 +167,46 @@ def main() -> None:
     plt.cla()
 
     # ===================================================================================
+    #                          MSE Vs Compression Factor
+    # ===================================================================================
+    filter = pl.col('Simulation') == 'compr_fact'
+
+    ax = sns.lineplot(
+        df.filter(filter),
+        x='Compression Factor',
+        y='Loss',
+        style='Channel',
+        hue='Case',
+        markers=True,
+    )
+    sns.move_legend(
+        ax,
+        'upper center',
+        ncol=2,
+        frameon=True,
+        bbox_to_anchor=(0.5, 1.3),
+    )
+    plt.xlabel(r'Compression Factor $\zeta$ (\%)')
+    plt.ylabel('MSE')
+    plt.xticks(ticks, labels=ticks)
+    plt.savefig(
+        str(IMG_PATH / 'MSEVsCompression_factor.pdf'),
+        format='pdf',
+        bbox_inches='tight',
+    )
+    plt.savefig(
+        str(IMG_PATH / 'MSEVsCompression_factor.png'),
+        bbox_inches='tight',
+    )
+    plt.clf()
+    plt.cla()
+
+    # ===================================================================================
     #                          Accuracy Vs Signal to Noise Ratio
     # ===================================================================================
-    filter = pl.col('Channel') == '4x4'
-    ch_usage = (df.filter(filter & (pl.col('Case').str.contains('Linear'))))[
+    filter = pl.col('Simulation') == 'snr'
+
+    ch_usage = (df.filter(filter & (pl.col('Case').str.contains('Semantic'))))[
         'Channel Usage'
     ].max()
 
@@ -183,6 +234,81 @@ def main() -> None:
         str(IMG_PATH / 'AccuracyVsSNR.png'),
         bbox_inches='tight',
     )
+    plt.clf()
+    plt.cla()
+
+    # ===================================================================================
+    #                          MSE & Accuracy - Homogeneous Vs Heterogeneous
+    # ===================================================================================
+    filter = (pl.col('Simulation') == 'homogeneous') | (
+        pl.col('Simulation') == 'heterogeneous'
+    )
+
+    plot_df = (
+        df.filter(filter)
+        .drop('Case')
+        .rename({'Simulation': 'Case'})
+        .sort(['Case'], descending=True)
+    )
+
+    ax = sns.lineplot(
+        plot_df,
+        x='Compression Factor',
+        y='Loss',
+        style='Case',
+        hue='Case',
+        markers=True,
+    )
+    sns.move_legend(
+        ax,
+        'upper center',
+        ncol=2,
+        frameon=True,
+        bbox_to_anchor=(0.5, 1.2),
+    )
+    plt.xlabel(r'Compression Factor $\zeta$ (\%)')
+    plt.ylabel('MSE')
+    plt.xticks(ticks, labels=ticks)
+    plt.savefig(
+        str(IMG_PATH / 'AlignmentStruggle.pdf'),
+        format='pdf',
+        bbox_inches='tight',
+    )
+    plt.savefig(
+        str(IMG_PATH / 'AlignmentStruggle.png'),
+        bbox_inches='tight',
+    )
+    plt.clf()
+    plt.cla()
+
+    ax = sns.lineplot(
+        plot_df,
+        x='Compression Factor',
+        y='Accuracy',
+        style='Case',
+        hue='Case',
+        markers=True,
+    )
+    sns.move_legend(
+        ax,
+        'upper center',
+        ncol=2,
+        frameon=True,
+        bbox_to_anchor=(0.5, 1.2),
+    )
+    plt.xlabel(r'Compression Factor $\zeta$ (\%)')
+    plt.xticks(ticks, labels=ticks)
+    plt.savefig(
+        str(IMG_PATH / 'AccuracyGroups.pdf'),
+        format='pdf',
+        bbox_inches='tight',
+    )
+    plt.savefig(
+        str(IMG_PATH / 'AccuracyGroups.png'),
+        bbox_inches='tight',
+    )
+    plt.clf()
+    plt.cla()
 
     return None
 

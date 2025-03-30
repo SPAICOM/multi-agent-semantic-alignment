@@ -23,7 +23,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 from src.neural_models import Classifier
 from src.utils import complex_gaussian_matrix
-from src.linear_models import BaseStation, Agent
+from src.linear_models import BaseStationBaseline, AgentBaseline
 from src.download_utils import download_zip_from_gdrive
 from src.datamodules import DataModule, DataModuleClassifier
 
@@ -62,8 +62,8 @@ def setup(
 
 
 @hydra.main(
-    config_path='../conf/train_linear',
-    config_name='train_linear',
+    config_path='../conf/train_baseline',
+    config_name='train_baseline',
     version_base='1.3',
 )
 def main(cfg: DictConfig) -> None:
@@ -79,7 +79,7 @@ def main(cfg: DictConfig) -> None:
     # Define some usefull paths
     CURRENT: Path = Path('.')
     MODEL_PATH: Path = CURRENT / 'models'
-    RESULTS_PATH: Path = CURRENT / 'results/linear_model'
+    RESULTS_PATH: Path = CURRENT / 'results/baseline'
 
     # Create results directory
     RESULTS_PATH.mkdir(exist_ok=True, parents=True)
@@ -89,7 +89,6 @@ def main(cfg: DictConfig) -> None:
         inference_mode=True,
         enable_progress_bar=False,
         logger=False,
-        accelerator=cfg.device,
     )
 
     # Setup procedure
@@ -103,8 +102,8 @@ def main(cfg: DictConfig) -> None:
     # Initialize W&B and log config
     wandb.init(
         project=cfg.wandb.project,
-        name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
-        id=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
+        name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}_{cfg.base_station.strategy}',
+        id=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}_{cfg.base_station.strategy}',
         config=wandb_config,
     )
 
@@ -141,16 +140,16 @@ def main(cfg: DictConfig) -> None:
 
     # Agents Initialization
     print()
-    agents: dict[int, Agent] = {
-        idx: Agent(
+    agents: dict[int, AgentBaseline] = {
+        idx: AgentBaseline(
             id=idx,
             pilots=datamodule.train_data.z_rx,
+            bs_pilots=datamodule.train_data.z_tx,
             model_name=datamodule.rx_enc,
             antennas_receiver=cfg.communication.antennas_receiver,
             channel_matrix=channel_matrixes[idx],
             channel_usage=cfg.communication.channel_usage,
             snr=cfg.communication.snr,
-            privacy=cfg.agents.privacy,
             device=cfg.device,
         )
         for idx, datamodule in tqdm(
@@ -183,22 +182,29 @@ def main(cfg: DictConfig) -> None:
 
     # Base Station Initialization
     transmitter_dim: int = datamodules[0].input_size
-    base_station: BaseStation = BaseStation(
+    base_station: BaseStationBaseline = BaseStationBaseline(
         model=cfg.base_station.model,
         dim=transmitter_dim,
         antennas_transmitter=cfg.communication.antennas_transmitter,
         channel_usage=cfg.communication.channel_usage,
-        rho=cfg.base_station.rho,
+        lr=cfg.base_station.lr,
         px_cost=cfg.base_station.px_cost,
+        strategy=cfg.base_station.strategy,
+        iterations=cfg.base_station.iterations,
         device=cfg.device,
     )
 
     # Perform Handshaking
     print()
     for agent_id in tqdm(agents, desc='Handshaking Procedure'):
+        a_msg: dict[str, torch.Tensor] = agents[agent_id].step(
+            channel_awareness=cfg.base_station.channel_aware
+        )
+
         base_station.handshake_step(
             idx=agent_id,
             pilots=datamodules[agent_id].train_data.z_tx,
+            received=a_msg,
             channel_matrix=channel_matrixes[agent_id]
             if cfg.base_station.channel_aware
             else None,
@@ -206,139 +212,127 @@ def main(cfg: DictConfig) -> None:
 
     # Base Station - Agent alignment
     print()
-    for i in tqdm(range(cfg.iterations), desc='Semantic Alignment'):
-        # Base Station transmits FX or HFX (depends if Base Station is channel aware or not)
-        grp_msgs: dict[int, torch.Tensor] = base_station.group_cast()
+    print('Performing Semantic Alignment...', end='\t')
+    base_station.step()
+    print('[DONE]')
 
-        # (i) Agents perform local G and F steps
-        # (ii) Agents send msg1 and msg2 to the base station
-        for idx, agent in agents.items():
-            a_msg: torch.Tensor = agent.step(
-                grp_msgs[idx],
-                channel_awareness=base_station.is_channel_aware(idx),
-            )
-            base_station.received_from_agent(msg=a_msg)
+    # ===========================================================================
+    #                          Logging Metrics
+    # ===========================================================================
 
-        # Base Station computes global F, Z, and U steps
-        base_station.step()
+    # Logging the trace of F during alignment
+    wandb.log({'F trace': base_station.get_trace()})
 
-        # ===========================================================================
-        #                          Logging Metrics
-        # ===========================================================================
-
-        # Logging the trace of F during alignment
-        wandb.log({'F trace': base_station.get_trace()})
-
-        # ===========================================================================
-        #                 Calculating Metrics over Train Dataset
-        # ===========================================================================
-        losses: dict[int, float] = {}
-        accuracy: dict[str, float] = {}
-        dataloaders: dict[int, DataLoader] = {}
-        for idx, datamodule in datamodules.items():
-            # Send the message from the base station
-            msg: torch.Tensor = base_station.transmit_to_agent(
-                idx, datamodule.train_data.z_tx.T
-            )
-
-            # Decode the msg from the base station
-            received: torch.Tensor = agents[idx].decode(
-                msg,
-                channel_awareness=base_station.is_channel_aware(idx),
-            )
-
-            if cfg.metrics.train_acc:
-                # Get accuracy
-                dataloaders[idx] = DataLoader(
-                    TensorDataset(received, datamodule.train_data.labels),
-                    batch_size=cfg.datamodule.batch_size,
-                )
-                accuracy[
-                    f'Agent-{idx} ({agents[idx].model_name}) - Task Accuracy (Train)'
-                ] = trainer.test(
-                    model=classifiers[idx], dataloaders=dataloaders[idx]
-                )[0]['test/acc_epoch']
-
-            # Get alignment loss
-            losses[
-                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Train)'
-            ]: float = agents[idx].eval(
-                received,
-                datamodule.train_data.z_rx,
-            )
-
-        wandb.log(losses)
-        wandb.log(
-            {
-                'Average Agents - MSE loss (Train)': sum(list(losses.values()))
-                / len(losses)
-            }
+    # ===========================================================================
+    #                 Calculating Metrics over Train Dataset
+    # ===========================================================================
+    losses: dict[int, float] = {}
+    accuracy: dict[str, float] = {}
+    dataloaders: dict[int, DataLoader] = {}
+    for idx, datamodule in datamodules.items():
+        # Send the message from the base station
+        msg: torch.Tensor = base_station.transmit_to_agent(
+            idx, datamodule.train_data.z_tx.T
         )
+
+        # Decode the msg from the base station
+        received: torch.Tensor = agents[idx].decode(
+            msg,
+            channel_awareness=base_station.is_channel_aware(idx),
+        )
+
         if cfg.metrics.train_acc:
-            wandb.log(
-                {
-                    'Average Agents - Task Accuracy (Train)': sum(
-                        list(accuracy.values())
-                    )
-                    / len(accuracy)
-                }
+            # Get accuracy
+            dataloaders[idx] = DataLoader(
+                TensorDataset(received, datamodule.train_data.labels),
+                batch_size=cfg.datamodule.batch_size,
             )
+            accuracy[
+                f'Agent-{idx} ({agents[idx].model_name}) - Task Accuracy (Train)'
+            ] = trainer.test(
+                model=classifiers[idx], dataloaders=dataloaders[idx]
+            )[0]['test/acc_epoch']
 
-        # ===========================================================================
-        #                 Calculating Metrics over Val Dataset
-        # ===========================================================================
-        losses: dict[int, float] = {}
-        accuracy: dict[str, float] = {}
-        dataloaders: dict[int, DataLoader] = {}
-        for idx, datamodule in datamodules.items():
-            # Send the message from the base station
-            msg: torch.Tensor = base_station.transmit_to_agent(
-                idx, datamodule.val_data.z_tx.T
-            )
+        # Get alignment loss
+        losses[
+            f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Train)'
+        ]: float = agents[idx].eval(
+            received,
+            datamodule.train_data.z_rx,
+        )
 
-            # Decode the msg from the base station
-            received: torch.Tensor = agents[idx].decode(
-                msg,
-                channel_awareness=base_station.is_channel_aware(idx),
-            )
-
-            if cfg.metrics.val_acc:
-                # Get accuracy
-                dataloaders[idx] = DataLoader(
-                    TensorDataset(received, datamodule.val_data.labels),
-                    batch_size=cfg.datamodule.batch_size,
-                )
-                accuracy[
-                    f'Agent-{idx} ({agents[idx].model_name}) - Task Accuracy (Val)'
-                ] = trainer.test(
-                    model=classifiers[idx], dataloaders=dataloaders[idx]
-                )[0]['test/acc_epoch']
-
-            # Get alignment loss
-            losses[
-                f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Val)'
-            ]: float = agents[idx].eval(
-                received,
-                datamodule.val_data.z_rx,
-            )
-
-        wandb.log(losses)
-        wandb.log(accuracy)
+    wandb.log(losses)
+    wandb.log(
+        {
+            'Average Agents - MSE loss (Train)': sum(list(losses.values()))
+            / len(losses)
+        }
+    )
+    if cfg.metrics.train_acc:
         wandb.log(
             {
-                'Average Agents - MSE loss (Val)': sum(list(losses.values()))
-                / len(losses)
+                'Average Agents - Task Accuracy (Train)': sum(
+                    list(accuracy.values())
+                )
+                / len(accuracy)
             }
         )
+
+    # ===========================================================================
+    #                 Calculating Metrics over Val Dataset
+    # ===========================================================================
+    losses: dict[int, float] = {}
+    accuracy: dict[str, float] = {}
+    dataloaders: dict[int, DataLoader] = {}
+    for idx, datamodule in datamodules.items():
+        # Send the message from the base station
+        msg: torch.Tensor = base_station.transmit_to_agent(
+            idx, datamodule.val_data.z_tx.T
+        )
+
+        # Decode the msg from the base station
+        received: torch.Tensor = agents[idx].decode(
+            msg,
+            channel_awareness=base_station.is_channel_aware(idx),
+        )
+
         if cfg.metrics.val_acc:
-            wandb.log(
-                {
-                    'Average Agents - Task Accuracy (Val)': sum(
-                        list(accuracy.values())
-                    )
-                    / len(accuracy)
-                }
+            # Get accuracy
+            dataloaders[idx] = DataLoader(
+                TensorDataset(received, datamodule.val_data.labels),
+                batch_size=cfg.datamodule.batch_size,
             )
+            accuracy[
+                f'Agent-{idx} ({agents[idx].model_name}) - Task Accuracy (Val)'
+            ] = trainer.test(
+                model=classifiers[idx], dataloaders=dataloaders[idx]
+            )[0]['test/acc_epoch']
+
+        # Get alignment loss
+        losses[
+            f'Agent-{idx} ({agents[idx].model_name}) - MSE loss (Val)'
+        ]: float = agents[idx].eval(
+            received,
+            datamodule.val_data.z_rx,
+        )
+
+    wandb.log(losses)
+    wandb.log(accuracy)
+    wandb.log(
+        {
+            'Average Agents - MSE loss (Val)': sum(list(losses.values()))
+            / len(losses)
+        }
+    )
+    if cfg.metrics.val_acc:
+        wandb.log(
+            {
+                'Average Agents - Task Accuracy (Val)': sum(
+                    list(accuracy.values())
+                )
+                / len(accuracy)
+            }
+        )
 
     # ==============================================================================
     #                     Evaluate over the test set
@@ -414,7 +408,9 @@ def main(cfg: DictConfig) -> None:
         {
             'Dataset': cfg.datamodule.dataset,
             'Seed': cfg.seed,
-            'Channel Usage': cfg.communication.channel_usage,
+            'Channel Usage': 2 * cfg.communication.channel_usage
+            if cfg.base_station.strategy == 'Top-K'
+            else cfg.communication.channel_usage,
             'Antennas Transmitter': cfg.communication.antennas_transmitter,
             'Antennas Receiver': cfg.communication.antennas_receiver,
             'SNR': cfg.communication.snr,
@@ -425,14 +421,14 @@ def main(cfg: DictConfig) -> None:
                 for a in accuracy
             ],
             'Base Station Model': base_station.model,
-            'Case': 'Federated Semantic Alignment',
+            'Case': f'Baseline {cfg.base_station.strategy}',
             'Latent Real Dim': base_station.dim,
             'Latent Complex Dim': (base_station.dim + 1) // 2,
             'Simulation': cfg.simulation,
         }
     ).write_parquet(
         RESULTS_PATH
-        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.simulation}.parquet'
+        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.base_station.strategy}_{cfg.simulation}.parquet'
     )
 
     wandb.finish()

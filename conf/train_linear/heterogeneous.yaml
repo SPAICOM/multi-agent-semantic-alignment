@@ -4,7 +4,7 @@ defaults:
 seed: 42
 device: cpu
 iterations: 30
-simulation: example
+simulation: heterogeneous
 
 datamodule:
   dataset: cifar10
@@ -31,14 +31,8 @@ agents:
   privacy: true
   models:
     - vit_small_patch16_224
-    - vit_small_patch32_224
     - vit_base_patch16_224
-    - vit_base_patch32_clip_224
-    - rexnet_100
     - mobilenetv3_small_075
-    - mobilenetv3_large_100
-    - mobilenetv3_small_100
-    - efficientvit_m5.r224_in1k
     - levit_128s.fb_dist_in1k
 
 wandb:
