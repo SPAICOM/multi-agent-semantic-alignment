@@ -735,6 +735,7 @@ class BaseStationBaseline(BaseStation):
         self.__F_A: dict[int, torch.Tensor] = {}
         self.__F_B: dict[int, torch.Tensor] = {}
         self.__F_C: dict[int, torch.Tensor] = {}
+        self.F_agent: dict[int, torch.Tensor] = {}
 
         # Attributes Initialization
         self.L: dict[int, torch.Tensor] = {}
@@ -758,11 +759,11 @@ class BaseStationBaseline(BaseStation):
 
         return None
 
-    def __F_local_step(
+    def __save_ABC(
         self,
         msg: dict[str, torch.Tensor],
     ) -> None:
-        """The local F step for an agent.
+        """Save A, B, C for agent idx.
 
         Args:
             msg : dict[str, torch.Tensor]
@@ -780,9 +781,36 @@ class BaseStationBaseline(BaseStation):
 
         # Variables
         self.__F_A[idx] = msg1.H @ msg1
-        self.__F_B[idx] = x @ x.H
-        self.__F_C[idx] = msg1.H @ x @ x.H
+        self.__F_B[idx] = torch.linalg.inv(x @ x.H)
+        self.__F_C[idx] = (msg1.H @ x @ x.H) @ self.__F_B[idx]
 
+        self.__F_local_step(idx)
+
+        return None
+
+    def __F_local_step(self, idx: int) -> None:
+        """The local F step.
+
+        Args:
+            idx : int
+                The agent idx.
+
+        Returns:
+            None
+        """
+        if self.lmb == 0:
+            # Solve for F when lambda equals 0, F = A.inv @ C @ B.inv , but __F_C is C @ B.inv
+            self.F_agent[idx] = (
+                torch.linalg.inv(self.__F_A[idx]) @ self.__F_C[idx]
+            )
+        else:
+            self.F_agent[idx] = torch.tensor(
+                solve_sylvester(
+                    self.__F_A[idx].cpu().numpy(),
+                    (self.lmb * self.c_repr * self.__F_B[idx]).cpu().numpy(),
+                    self.__F_C[idx].cpu().numpy(),
+                )
+            ).to(self.device)
         return None
 
     def __F_global_step(self) -> None:
@@ -794,19 +822,6 @@ class BaseStationBaseline(BaseStation):
         Returns:
             None
         """
-
-        def sum_tensors(tensors: list[torch.Tensor]) -> torch.Tensor:
-            """A usefull method to sum a list of tensors.
-
-            Args:
-                l : torch.Tensor
-                    A list containg tensors.
-
-            Returns:
-                torch.Tensor
-                    The sum of the tensors.
-            """
-            return torch.stack(tensors, dim=0).sum(dim=0) / len(tensors)
 
         def lmb_update(lmb: float) -> None:
             """Method needed to update lmb in relation to the constraint violation.
@@ -820,7 +835,6 @@ class BaseStationBaseline(BaseStation):
                     The updated lmb.
             """
             cnst_viol = self.get_trace() - self.px_cost
-            # print(cnst_viol, self.get_trace())
 
             if cnst_viol > 0:
                 lmb += self.lr * cnst_viol
@@ -829,27 +843,22 @@ class BaseStationBaseline(BaseStation):
                 lmb = 0
             return lmb
 
-        # Aggregate the single agents components
-        A = sum_tensors(list(self.__F_A.values()))
-        B = torch.linalg.inv(sum_tensors(list(self.__F_B.values())))
-        C = sum_tensors(list(self.__F_C.values())) @ B
+        self.F = torch.stack(list(self.F_agent.values()), dim=0).mean(dim=0)
 
         # Check if the constraint is respected
         if self.get_trace() - self.px_cost > 0:
             # Constraint not respected, then we proceed finding the right lambda
-            c_repr = sum([d['n'] for d in self.agents_pilots.values()])
-            for i in range(self.iterations):
+            self.c_repr = sum([d['n'] for d in self.agents_pilots.values()])
+            for _ in range(self.iterations):
                 self.lmb = lmb_update(self.lmb)
 
-                self.F = torch.tensor(
-                    solve_sylvester(
-                        A.cpu().numpy(),
-                        (self.lmb * c_repr * B).cpu().numpy(),
-                        C.cpu().numpy(),
-                    )
-                ).to(self.device)
-                # print(self.lmb)
+                # Perform the local step for each agent
+                for agent_id in self.F_agent:
+                    self.__F_local_step(agent_id)
 
+                self.F = torch.stack(list(self.F_agent.values()), dim=0).mean(
+                    dim=0
+                )
         else:
             # Constraint respected, set lambda to zero
             self.lmb = 0
@@ -972,7 +981,7 @@ class BaseStationBaseline(BaseStation):
         )
 
         # Compute the local F step
-        self.__F_local_step(
+        self.__save_ABC(
             msg={
                 'idx': received['idx'],
                 'msg1': received['msg1'],
