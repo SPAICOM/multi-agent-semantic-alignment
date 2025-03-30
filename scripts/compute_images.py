@@ -206,7 +206,7 @@ def main() -> None:
     # ===================================================================================
     filter = pl.col('Simulation') == 'snr'
 
-    ch_usage = (df.filter(filter & (pl.col('Case').str.contains('Linear'))))[
+    ch_usage = (df.filter(filter & (pl.col('Case').str.contains('Semantic'))))[
         'Channel Usage'
     ].max()
 

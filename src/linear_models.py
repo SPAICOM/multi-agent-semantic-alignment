@@ -674,12 +674,10 @@ class BaseStationBaseline(BaseStation):
             The channel usage of the communication. Default 1.
         px_cost : float
             The transmitter power constraint. Default 1.0.
-        lmb : float
-            The lmb coefficient for the constraint. Default 1e-2.
         lr : float
             The learning rate for estimating the right F subject to the power constraint. Default 1e-2.
         strategy : str
-            The strategy to choose the packets, possible values 'FK' or 'Top-K'. Default 'FK'.
+            The strategy to choose the packets, possible values 'First-K' or 'Top-K'. Default 'First-K'.
         iterarions : int
             The number of iterations for the constraint. Default 30.
         device : str
@@ -712,13 +710,12 @@ class BaseStationBaseline(BaseStation):
         antennas_transmitter: int,
         channel_usage: int = 1,
         px_cost: float = 1.0,
-        lmb: float = 1e-2,
         lr: float = 1e-2,
-        strategy: str = 'firstK',
+        strategy: str = 'First-K',
         iterations: int = 30,
         device: str = 'cpu',
     ) -> None:
-        assert strategy in ['FK', 'Top-K'], (
+        assert strategy in ['First-K', 'Top-K'], (
             f'The passed strategy {strategy} is not supported.'
         )
 
@@ -728,7 +725,6 @@ class BaseStationBaseline(BaseStation):
         self.channel_usage: int = channel_usage
         self.px_cost: float = px_cost
         self.device: str = device
-        self.lmb: float = 0
         self.lr: float = lr
         self.strategy: str = strategy
         self.iterations: int = iterations
@@ -738,6 +734,7 @@ class BaseStationBaseline(BaseStation):
         self.F_agent: dict[int, torch.Tensor] = {}
 
         # Attributes Initialization
+        self.lmb: float = 0
         self.L: dict[int, torch.Tensor] = {}
         self.mean: dict[int, float] = {}
         self.agents_id: set[int] = set()
@@ -898,7 +895,7 @@ class BaseStationBaseline(BaseStation):
         # Features to transmit
         sent_features = 2 * self.channel_usage * self.antennas_transmitter
 
-        if self.strategy == 'FK':
+        if self.strategy == 'First-K':
             input = input[:sent_features, :]
             indexes = None
 
@@ -1146,7 +1143,7 @@ class AgentBaseline(Agent):
 
         output = torch.zeros(size, n)
 
-        if strategy == 'FK':
+        if strategy == 'First-K':
             output[:sent_features, :] = received
 
         elif strategy == 'Top-K':

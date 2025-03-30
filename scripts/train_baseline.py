@@ -187,7 +187,6 @@ def main(cfg: DictConfig) -> None:
         dim=transmitter_dim,
         antennas_transmitter=cfg.communication.antennas_transmitter,
         channel_usage=cfg.communication.channel_usage,
-        lmb=cfg.base_station.lmb,
         lr=cfg.base_station.lr,
         px_cost=cfg.base_station.px_cost,
         strategy=cfg.base_station.strategy,

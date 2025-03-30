@@ -22,10 +22,9 @@ communication:
   
 base_station:
   model: vit_tiny_patch16_224
-  lmb: 1e-1
   lr: 1e-1
   px_cost: 1.0
-  strategy: FK
+  strategy: First-K
   iterations: 30
   channel_aware: true
 

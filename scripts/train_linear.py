@@ -425,7 +425,7 @@ def main(cfg: DictConfig) -> None:
                 for a in accuracy
             ],
             'Base Station Model': base_station.model,
-            'Case': 'Linear Semantic Precoding/Decoding',
+            'Case': 'Federated Semantic Alignment',
             'Latent Real Dim': base_station.dim,
             'Latent Complex Dim': (base_station.dim + 1) // 2,
             'Simulation': cfg.simulation,
