@@ -167,6 +167,41 @@ def main() -> None:
     plt.cla()
 
     # ===================================================================================
+    #                          MSE Vs Compression Factor
+    # ===================================================================================
+    filter = pl.col('Simulation') == 'compr_fact'
+
+    ax = sns.lineplot(
+        df.filter(filter),
+        x='Compression Factor',
+        y='Loss',
+        style='Channel',
+        hue='Case',
+        markers=True,
+    )
+    sns.move_legend(
+        ax,
+        'upper center',
+        ncol=2,
+        frameon=True,
+        bbox_to_anchor=(0.5, 1.3),
+    )
+    plt.xlabel(r'Compression Factor $\zeta$ (\%)')
+    plt.ylabel('MSE')
+    plt.xticks(ticks, labels=ticks)
+    plt.savefig(
+        str(IMG_PATH / 'MSEVsCompression_factor.pdf'),
+        format='pdf',
+        bbox_inches='tight',
+    )
+    plt.savefig(
+        str(IMG_PATH / 'MSEVsCompression_factor.png'),
+        bbox_inches='tight',
+    )
+    plt.clf()
+    plt.cla()
+
+    # ===================================================================================
     #                          Accuracy Vs Signal to Noise Ratio
     # ===================================================================================
     filter = pl.col('Simulation') == 'snr'

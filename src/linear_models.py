@@ -745,12 +745,15 @@ class BaseStationBaseline(BaseStation):
         self.channel_matrixes: dict[int, torch.Tensor] = {}
 
         # Initialize Global F at random and locals
-        self.F = torch.randn(
-            (
-                self.antennas_transmitter * self.channel_usage,
-                self.antennas_transmitter * self.channel_usage,
+        self.F = torch.kron(
+            torch.eye(self.channel_usage, dtype=torch.complex64),
+            torch.randn(
+                (
+                    self.antennas_transmitter,
+                    self.antennas_transmitter,
+                ),
+                dtype=torch.complex64,
             ),
-            dtype=torch.complex64,
         ).to(self.device)
 
         return None
@@ -1007,6 +1010,11 @@ class BaseStationBaseline(BaseStation):
         # Compress the message
         msg = self.__compression(msg)
 
+        # Prewhitening
+        msg['pilots'] = a_inv_times_b(
+            self.L[idx], msg['pilots'] - self.mean[idx]
+        )
+
         # Encode the message
         msg['pilots'] = self.F @ msg['pilots']
 
@@ -1191,30 +1199,6 @@ class AgentBaseline(Agent):
             output,
         ).solution.T
         return None
-
-    # def alignment_step(
-    #     self,
-    #     input: torch.Tensor,
-    #     channel_awareness: bool,
-    #     # output: torch.Tensor,
-    # ) -> None:
-    #     """The alignment step to align the semantic pilots.
-
-    #     Args:
-    #         input : torch.Tensor
-    #             The input tensor which we want to align.
-    #         output : torch.Tensor
-    #             The output tensor which is the tensor we want to align to.
-
-    #     Returns:
-    #         None
-    #     """
-    #     input = self.decode(input, channel_awareness=channel_awareness).T
-    #     self.A = torch.linalg.lstsq(
-    #         input.T,
-    #         self.pilots.T,
-    #     ).solution.T
-    #     return None
 
     def step(
         self,
