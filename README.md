@@ -5,47 +5,85 @@
 
 ## Simulations
 
+This section provides the necessary commands to run the simulations required for the experiments. The commands execute different training scripts with specific configurations. Each simulation subsection contains both the `python` command and `uv` counterpart.
+
 ### Accuracy Vs Compression Factor
 
 ```bash
+# Federated Semantic Alignment
+python scripts/train_linear.py communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 simulation=compr_fact -m
+
+# Baseline First-K
+python scripts/train_baseline.py communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 base_station.strategy=First-K simulation=compr_fact -m
+
+# Baseline Top-K
+python scripts/train_baseline.py communication.channel_usage=1,2,3,4,5,10 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 base_station.strategy=Top-K simulation=compr_fact -m
+```
+
+```bash
+# Federated Semantic Alignment
 uv run scripts/train_linear.py communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 simulation=compr_fact -m
-```
 
-```bash
+# Baseline First-K
 uv run scripts/train_baseline.py communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 base_station.strategy=First-K simulation=compr_fact -m
-```
 
-```bash
+# Baseline Top-K
 uv run scripts/train_baseline.py communication.channel_usage=1,2,3,4,5,10 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 base_station.strategy=Top-K simulation=compr_fact -m
 ```
 
 ### Accuracy Vs SNR
 
 ```bash
+# Federated Semantic Alignment
+python scripts/train_linear.py communication.channel_usage=1,4,8 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 simulation=snr -m
+
+# Baseline First-K
+python scripts/train_baseline.py communication.channel_usage=1,4,8 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=First-K simulation=snr -m
+
+# Baseline Top-K
+uv run scripts/train_baseline.py communication.channel_usage=2,4 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=Top-K simulation=snr -m
+```
+
+```bash
+# Federated Semantic Alignment
 uv run scripts/train_linear.py communication.channel_usage=1,4,8 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 simulation=snr -m
-```
 
-```bash
-uv run scripts/train_baseline.py communication.channel_usage=1,4,8 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=First-K simulation=snr -m
-```
+# Baseline First-K
+x uv run scripts/train_baseline.py communication.channel_usage=1,4,8 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=First-K simulation=snr -m
 
-```bash
+# Baseline Top-K
 uv run scripts/train_baseline.py communication.channel_usage=2,4 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=Top-K simulation=snr -m
 ```
 
 ### Heterogenous Vs Homogeneous
 
 ```bash
-uv run scripts/train_linear.py --config-name=heterogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
+# Heterogeneous
+python scripts/train_linear.py --config-name=heterogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
+
+# Homogeneous
+python scripts/train_linear.py --config-name=homogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
 ```
 
 ```bash
+# Heterogeneous
+uv run scripts/train_linear.py --config-name=heterogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
+
+# Homogeneous
 uv run scripts/train_linear.py --config-name=homogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
 ```
 
 ### Classifiers
 
+The following command will initiate training of the required classifiers for the above simulations. However, this step is not strictly necessary, as the simulation scripts will automatically check for the presence of pretrained classifiers in the `models/classifiers` subfolder. If the classifiers are not found, a pretrained version (used in our paper) will be downloaded from Drive.
+
 ```bash
+# Classifiers
+python scripts/train_classifier.py rx_enc=vit_small_patch16_224,vit_small_patch32_224,vit_base_patch16_224,vit_base_patch32_clip_224,rexnet_100,mobilenetv3_small_075,mobilenetv3_large_100,mobilenetv3_small_100,efficientvit_m5.r224_in1k,levit_128s.fb_dist_in1k,vit_tiny_patch16_224 seed=27,42,100,123,144,200 -m
+```
+
+```bash
+# Classifiers
 uv run scripts/train_classifier.py rx_enc=vit_small_patch16_224,vit_small_patch32_224,vit_base_patch16_224,vit_base_patch32_clip_224,rexnet_100,mobilenetv3_small_075,mobilenetv3_large_100,mobilenetv3_small_100,efficientvit_m5.r224_in1k,levit_128s.fb_dist_in1k,vit_tiny_patch16_224 seed=27,42,100,123,144,200 -m
 ```
 
@@ -112,6 +150,7 @@ You're ready to go! 🚀
 - [Giuseppe Di Poce](https://github.com/giuseppedipoce)
 - [Mario Edoardo Pandolfo](https://github.com/JRhin)
 - [Paolo Di Lorenzo](https://scholar.google.com/citations?hl=en&user=VZYvspQAAAAJ)
+- [Emilio Calvanese Strinati](https://scholar.google.com/citations?user=bWndGhQAAAAJ)
 
 ## Used Technologies
 
