@@ -41,7 +41,7 @@ python scripts/train_linear.py communication.channel_usage=1,4,8 communication.a
 python scripts/train_baseline.py communication.channel_usage=1,4,8 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=First-K simulation=snr -m
 
 # Baseline Top-K
-uv run scripts/train_baseline.py communication.channel_usage=2,4 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=Top-K simulation=snr -m
+python scripts/train_baseline.py communication.channel_usage=2,4 communication.antennas_receiver=4 communication.antennas_transmitter=4 seed=27,42,100,123,144,200 communication.snr=-20.0,-10.0,10.0,20.0,30.0 base_station.strategy=Top-K simulation=snr -m
 ```
 
 ```bash
