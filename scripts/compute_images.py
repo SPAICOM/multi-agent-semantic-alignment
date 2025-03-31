@@ -40,23 +40,7 @@ def main() -> None:
     sns.set_style('whitegrid')
 
     # Set style
-    plt.rcParams.update(
-        {
-            'figure.figsize': (12, 8),
-            'font.size': 22,
-            'axes.titlesize': 24,
-            'axes.labelsize': 24,
-            'xtick.labelsize': 22,
-            'ytick.labelsize': 22,
-            'legend.fontsize': 20,
-            'legend.title_fontsize': 22,
-            'lines.markersize': 18,
-            'lines.linewidth': 3,
-            'text.usetex': True,
-            'font.family': 'serif',
-            'font.serif': ['Times New Roman', 'Times'],
-        }
-    )
+    plt.style.use('.conf/plot/plt.mplstyle')
 
     # Retrieve Data
     df: pl.DataFrame = (

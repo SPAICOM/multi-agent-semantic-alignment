@@ -62,7 +62,7 @@ def setup(
 
 
 @hydra.main(
-    config_path='../conf/train_linear',
+    config_path='../.conf/hydra/linear',
     config_name='train_linear',
     version_base='1.3',
 )

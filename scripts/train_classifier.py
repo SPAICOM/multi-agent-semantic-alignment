@@ -1,7 +1,5 @@
 """
 This python module handles the training of the classifier.
-
-To check available parameters run 'python /path/to/train_classifier.py --help'.
 """
 
 # Add root to the path
@@ -34,7 +32,7 @@ from src.neural_models import Classifier
 
 
 @hydra.main(
-    config_path='../conf/train_classifier',
+    config_path='../.conf/hydra/classifier',
     config_name='train_classifier',
     version_base='1.3',
 )

@@ -1,5 +1,5 @@
 """
-This python module computes a simulation of a Base Station communicating with a group of agents.
+This python module computes a baseline simulation of a Base Station communicating with a group of agents.
 """
 
 # Add root to the path
@@ -62,7 +62,7 @@ def setup(
 
 
 @hydra.main(
-    config_path='../conf/train_baseline',
+    config_path='../.conf/hydra/baseline',
     config_name='train_baseline',
     version_base='1.3',
 )
