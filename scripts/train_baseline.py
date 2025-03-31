@@ -62,7 +62,7 @@ def setup(
 
 
 @hydra.main(
-    config_path='../conf/train_baseline',
+    config_path='../.conf/hydra/baseline',
     config_name='train_baseline',
     version_base='1.3',
 )

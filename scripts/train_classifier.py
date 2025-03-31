@@ -32,7 +32,7 @@ from src.neural_models import Classifier
 
 
 @hydra.main(
-    config_path='../conf/train_classifier',
+    config_path='../.conf/hydra/classifier',
     config_name='train_classifier',
     version_base='1.3',
 )
