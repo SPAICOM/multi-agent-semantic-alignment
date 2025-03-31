@@ -1,7 +1,5 @@
 """
 This python module handles the training of the classifier.
-
-To check available parameters run 'python /path/to/train_classifier.py --help'.
 """
 
 # Add root to the path

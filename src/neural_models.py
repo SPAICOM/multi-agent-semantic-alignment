@@ -235,6 +235,12 @@ class Classifier(pl.LightningModule):
 
         return preds
 
+# =======================================================
+#
+#                     MAIN LOOP
+#
+# =======================================================
+
 
 def main() -> None:
     """The main script loop in which we perform some sanity tests."""

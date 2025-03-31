@@ -1,5 +1,5 @@
 """
-This python module computes a simulation of a Base Station communicating with a group of agents.
+This python module computes a baseline simulation of a Base Station communicating with a group of agents.
 """
 
 # Add root to the path
