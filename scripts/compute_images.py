@@ -40,7 +40,7 @@ def main() -> None:
     sns.set_style('whitegrid')
 
     # Set style
-    plt.style.use('.conf/plot/plt.mplstyle')
+    plt.style.use('.conf/plotting/plt.mplstyle')
 
     # Retrieve Data
     df: pl.DataFrame = (
@@ -251,7 +251,7 @@ def main() -> None:
         bbox_to_anchor=(0.5, 1.2),
     )
     plt.xlabel(r'Compression Factor $\zeta$ (\%)')
-    plt.ylabel('MSE')
+    plt.ylabel('Network MSE')
     plt.xticks(ticks, labels=ticks)
     plt.savefig(
         str(IMG_PATH / 'AlignmentStruggle.pdf'),
