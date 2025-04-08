@@ -103,8 +103,8 @@ def main(cfg: DictConfig) -> None:
     # Initialize W&B and log config
     wandb.init(
         project=cfg.wandb.project,
-        name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
-        id=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
+        name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}_{cfg.simulation}_{cfg.datamodule.dataset}_{cfg.datamodule.train_subset_ratio}',
+        id=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}_{cfg.simulation}_{cfg.datamodule.dataset}_{cfg.datamodule.train_subset_ratio}',
         config=wandb_config,
     )
 
@@ -130,6 +130,7 @@ def main(cfg: DictConfig) -> None:
             dataset=cfg.datamodule.dataset,
             tx_enc=cfg.base_station.model,
             rx_enc=agent_model,
+            train_subset_ratio=cfg.datamodule.train_subset_ratio,
             batch_size=cfg.datamodule.batch_size,
         )
         for idx, agent_model in enumerate(cfg.agents.models)
@@ -413,6 +414,7 @@ def main(cfg: DictConfig) -> None:
     pl.DataFrame(
         {
             'Dataset': cfg.datamodule.dataset,
+            'Training Subset Ratio': cfg.datamodule.train_subset_ratio,
             'Seed': cfg.seed,
             'Channel Usage': cfg.communication.channel_usage,
             'Antennas Transmitter': cfg.communication.antennas_transmitter,
@@ -432,7 +434,7 @@ def main(cfg: DictConfig) -> None:
         }
     ).write_parquet(
         RESULTS_PATH
-        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.simulation}.parquet'
+        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.datamodule.dataset}_{cfg.datamodule.train_subset_ratio}_{cfg.simulation}.parquet'
     )
 
     wandb.finish()

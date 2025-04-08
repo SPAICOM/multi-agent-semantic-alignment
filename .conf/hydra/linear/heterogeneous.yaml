@@ -8,6 +8,7 @@ simulation: heterogeneous
 
 datamodule:
   dataset: cifar10
+  train_subset_ratio: 1.0
   batch_size: 512
 
 metrics:

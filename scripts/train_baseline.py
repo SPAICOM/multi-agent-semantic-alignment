@@ -96,14 +96,16 @@ def main(cfg: DictConfig) -> None:
 
     # Convert DictConfig to a standard dictionary before passing to wandb
     wandb_config = OmegaConf.to_container(
-        cfg, resolve=True, throw_on_missing=True
+        cfg,
+        resolve=True,
+        throw_on_missing=True,
     )
 
     # Initialize W&B and log config
     wandb.init(
         project=cfg.wandb.project,
-        name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}_{cfg.base_station.strategy}',
-        id=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}_{cfg.base_station.strategy}',
+        name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}_{cfg.base_station.strategy}_{cfg.simulation}_{cfg.datamodule.dataset}_{cfg.datamodule.train_subset_ratio}',
+        id=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}_{cfg.base_station.strategy}_{cfg.simulation}_{cfg.datamodule.dataset}_{cfg.datamodule.train_subset_ratio}',
         config=wandb_config,
     )
 
@@ -129,6 +131,7 @@ def main(cfg: DictConfig) -> None:
             dataset=cfg.datamodule.dataset,
             tx_enc=cfg.base_station.model,
             rx_enc=agent_model,
+            train_subset_ratio=cfg.datamodule.train_subset_ratio,
             batch_size=cfg.datamodule.batch_size,
         )
         for idx, agent_model in enumerate(cfg.agents.models)
@@ -407,6 +410,7 @@ def main(cfg: DictConfig) -> None:
     pl.DataFrame(
         {
             'Dataset': cfg.datamodule.dataset,
+            'Training Subset Ratio': cfg.datamodule.train_subset_ratio,
             'Seed': cfg.seed,
             'Channel Usage': 2 * cfg.communication.channel_usage
             if cfg.base_station.strategy == 'Top-K'
@@ -428,7 +432,7 @@ def main(cfg: DictConfig) -> None:
         }
     ).write_parquet(
         RESULTS_PATH
-        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.base_station.strategy}_{cfg.simulation}.parquet'
+        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.datamodule.dataset}_{cfg.datamodule.train_subset_ratio}_{cfg.base_station.strategy}_{cfg.simulation}.parquet'
     )
 
     wandb.finish()

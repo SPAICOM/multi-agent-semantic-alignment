@@ -213,6 +213,8 @@ class DataModule(LightningDataModule):
             The name of the encoder transmitter side.
         rx_enc : str
             The name of the encoder transmitter side.
+        train_subset_ratio : float
+            The ratio of dataset to use for training. Default 1.0.
         batch_size : int
             The size of a batch. Default 128.
         num_workers : int
@@ -228,6 +230,7 @@ class DataModule(LightningDataModule):
         dataset: str,
         tx_enc: str,
         rx_enc: str,
+        train_subset_ratio: float = 1.0,
         batch_size: int = 128,
         num_workers: int = 0,
     ) -> None:
@@ -236,6 +239,7 @@ class DataModule(LightningDataModule):
         self.dataset: str = dataset
         self.tx_enc: str = tx_enc
         self.rx_enc: str = rx_enc
+        self.train_subset_ratio: float = train_subset_ratio
         self.batch_size: int = batch_size
         self.num_workers: int = num_workers
 
@@ -271,14 +275,33 @@ class DataModule(LightningDataModule):
         CURRENT = Path('.')
         GENERAL_PATH: Path = CURRENT / 'data/latents' / self.dataset
 
+        # ================================================================
+        #                         Train Data
+        # ================================================================
         self.train_data = CustomDataset(
             tx_path=GENERAL_PATH / 'train' / f'{self.tx_enc}.pt',
             rx_path=GENERAL_PATH / 'train' / f'{self.rx_enc}.pt',
         )
+
+        full_size = len(self.train_data)
+        subset_size = int(full_size * self.train_subset_ratio)
+        indices = torch.randperm(full_size)[:subset_size]
+
+        self.train_data.z_tx = self.train_data.z_tx[indices]
+        self.train_data.z_rx = self.train_data.z_rx[indices]
+        self.train_data.labels = self.train_data.labels[indices]
+
+        # ================================================================
+        #                         Test Data
+        # ================================================================
         self.test_data = CustomDataset(
             tx_path=GENERAL_PATH / 'test' / f'{self.tx_enc}.pt',
             rx_path=GENERAL_PATH / 'test' / f'{self.rx_enc}.pt',
         )
+
+        # ================================================================
+        #                         Val Data
+        # ================================================================
         self.val_data = CustomDataset(
             tx_path=GENERAL_PATH / 'val' / f'{self.tx_enc}.pt',
             rx_path=GENERAL_PATH / 'val' / f'{self.rx_enc}.pt',

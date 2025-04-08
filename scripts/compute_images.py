@@ -62,6 +62,7 @@ def main() -> None:
                 'Seed',
                 'SNR',
                 'Simulation',
+                'Training Subset Ratio',
             ]
         )
         .agg(

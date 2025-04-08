@@ -59,18 +59,18 @@ uv run scripts/train_baseline.py communication.channel_usage=2,4 communication.a
 
 ```bash
 # Heterogeneous
-python scripts/train_linear.py --config-name=heterogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
+python scripts/train_linear.py --config-name=heterogeneous communication.channel_usage=1,2,4,6,8,10,20 datamodule.train_subset_ratio=1.0 seed=27,42,100,123,144,200 -m
 
 # Homogeneous
-python scripts/train_linear.py --config-name=homogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
+python scripts/train_linear.py --config-name=homogeneous communication.channel_usage=1,2,4,6,8,10,20 datamodule.train_subset_ratio=1.0 seed=27,42,100,123,144,200 -m
 ```
 
 ```bash
 # Heterogeneous
-uv run scripts/train_linear.py --config-name=heterogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
+uv run scripts/train_linear.py --config-name=heterogeneous communication.channel_usage=1,2,4,6,8,10,20 datamodule.train_subset_ratio=1.0 seed=27,42,100,123,144,200 -m
 
 # Homogeneous
-uv run scripts/train_linear.py --config-name=homogeneous communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 -m
+uv run scripts/train_linear.py --config-name=homogeneous communication.channel_usage=1,2,4,6,8,10,20 datamodule.train_subset_ratio=1.0 seed=27,42,100,123,144,200 -m
 ```
 
 ### Classifiers
