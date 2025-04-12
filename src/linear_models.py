@@ -24,7 +24,6 @@ else:
         a_inv_times_b,
     )
 
-
 # ============================================================
 #
 #                    CLASSES DEFINITION
@@ -50,6 +49,8 @@ class BaseStation:
             The transmitter power constraint. Default 1.0.
         device : str
             The device on which we run the simulation. Default "cpu".
+        status : str
+            The stream status of BS: [multi-link] or [shared]. Default "shared".
 
     Attributes:
         self.<param_name> :
@@ -85,6 +86,7 @@ class BaseStation:
         rho: float = 1e-1,
         px_cost: float = 1.0,
         device: str = 'cpu',
+        status: str = 'shared',
     ) -> None:
         self.model: str = model
         self.dim: int = dim
@@ -93,6 +95,7 @@ class BaseStation:
         self.rho: float = rho
         self.px_cost: float = px_cost
         self.device: str = device
+        self.status: str = status
 
         # Attributes Initialization
         self.L: dict[int, torch.Tensor] = {}
@@ -110,11 +113,15 @@ class BaseStation:
             ),
             dtype=torch.complex64,
         ).to(self.device)
-        self.F_agent = {}
 
+        self.F_agent = {}
         # ADMM variables
-        self.Z = torch.zeros_like(self.F)
-        self.U = torch.zeros_like(self.F)
+        if self.status=='shared':
+            self.Z = torch.zeros_like(self.F)
+            self.U = torch.zeros_like(self.F)
+        elif status == 'multi-link':
+            self.Z = {}
+            self.U = {}
 
         return None
 
@@ -126,6 +133,7 @@ class BaseStation:
                 The description of the Base Station status in string format.
         """
         description = f"""Base Station Infos:
+        Status : :{self.status},
         Channel Awareness: {self.channel_awareness}.
         
         {len(self.agents_id)} agents connected:
@@ -170,6 +178,11 @@ class BaseStation:
 
         # Connect the agent to the base station
         self.agents_id.add(idx)
+        #populate the initialization of F_agent, Z_agent and U_agent
+        if self.status=='multi-link':
+            self.F_agent[idx] = self.F.clone()
+            self.Z[idx] = torch.zeros_like(self.F)
+            self.U[idx] = torch.zeros_like(self.F)
 
         # Add channel matrix
         if channel_matrix is None:
@@ -257,9 +270,14 @@ class BaseStation:
 
         if not alignment:
             msg = self.__compression_and_prewhitening(msg, idx)
+        
+        #Treat the multi-link scenario differently 
+        if self.status == 'multi-link':
+            msg = self.F_agent[idx] @ msg
 
-        # Encode the message
-        msg = self.F @ msg
+        elif self.status == 'shared':
+            # Encode the message
+            msg = self.F @ msg
 
         # Transmit over the channel
         if self.is_channel_aware(idx):
@@ -305,14 +323,13 @@ class BaseStation:
         idx, msg1, msg2 = msg.values()
         msg1 = msg1.to(self.device)
         msg2 = msg2.to(self.device)
-
         # Variables
         _, n = self.agents_pilots[idx].shape
         rho = self.rho * n
         B = torch.linalg.inv(
             self.agents_pilots[idx] @ self.agents_pilots[idx].H
         )
-        C = (rho * (self.Z - self.U) + msg2 @ self.agents_pilots[idx].H) @ B
+        C = (rho * (self.Z[idx] - self.U[idx]) + msg2 @ self.agents_pilots[idx].H) @ B
 
         self.F_agent[idx] = torch.tensor(
             solve_sylvester(
@@ -340,7 +357,8 @@ class BaseStation:
         self.F = torch.stack(list(self.F_agent.values()), dim=0).mean(dim=0)
 
         # Clean local F
-        self.F_agent = {}
+        if self.status != 'multi-link':
+            self.F_agent = {}
 
         return None
 
@@ -353,14 +371,29 @@ class BaseStation:
         Returns:
             None
         """
-        C = self.F + self.U
-        tr = torch.trace(C @ C.H).real
+        if self.status == 'multi-link':
+           #Z step for multi-link mode: dictionary-based Z[idx].
+            for idx in self.agents_id:
+                C = self.F_agent[idx] + self.U[idx]
+                tr = torch.trace(C @ C.H).real
+                if tr <= self.px_cost:
+                    self.Z[idx] = C
+                else:
+                    lambd = torch.sqrt(tr / self.px_cost).item() - 1.0
+                    self.Z[idx] = C / (1.0 + lambd)
 
-        if tr <= self.px_cost:
-            self.Z = C
+        elif self.status == 'shared':
+            C = self.F + self.U
+            tr = torch.trace(C @ C.H).real
+
+            if tr <= self.px_cost:
+                self.Z = C
+            else:
+                lmb = torch.sqrt(tr / self.px_cost).item() - 1
+                self.Z = C / (1 + lmb)
+
         else:
-            lmb = torch.sqrt(tr / self.px_cost).item() - 1
-            self.Z = C / (1 + lmb)
+            print("Status of Base Station is not recognized;")
 
         return None
 
@@ -373,7 +406,14 @@ class BaseStation:
         Returns:
             None
         """
-        self.U += self.F - self.Z
+        if self.status == 'multi-link':
+          for idx in self.agents_id:
+            self.U[idx] += self.F_agent[idx] - self.Z[idx]
+
+        elif self.status == 'shared':
+            self.U += self.F - self.Z
+        else:
+            print("Status of Base Station is not recognized;")
         return None
 
     def is_channel_aware(
@@ -414,7 +454,8 @@ class BaseStation:
         Return:
             None
         """
-        self.__F_global_step()
+        if self.status == 'shared':
+            self.__F_global_step()
         self.__Z_step()
         self.__U_step()
         return None
@@ -1268,7 +1309,6 @@ class AgentBaseline(Agent):
 
         return msg.T
 
-
 # ============================================================
 #
 #                         MAIN LOOP
@@ -1414,7 +1454,6 @@ def main() -> None:
     print('[Passed]')
 
     return None
-
 
 if __name__ == '__main__':
     main()

@@ -79,7 +79,7 @@ def main(cfg: DictConfig) -> None:
     # Define some usefull paths
     CURRENT: Path = Path('.')
     MODEL_PATH: Path = CURRENT / 'models'
-    RESULTS_PATH: Path = CURRENT / 'results/linear_model'
+    RESULTS_PATH: Path = CURRENT / 'multi-link'
 
     # Create results directory
     RESULTS_PATH.mkdir(exist_ok=True, parents=True)
@@ -191,6 +191,7 @@ def main(cfg: DictConfig) -> None:
         rho=cfg.base_station.rho,
         px_cost=cfg.base_station.px_cost,
         device=cfg.device,
+        status= cfg.base_station.status
     )
 
     # Perform Handshaking
@@ -219,7 +220,7 @@ def main(cfg: DictConfig) -> None:
             )
             base_station.received_from_agent(msg=a_msg)
 
-        # Base Station computes global F, Z, and U steps
+        # Base Station computes global F, Z, and U stepsb based on its communication status(shared or multi-link)
         base_station.step()
 
         # ===========================================================================
@@ -425,14 +426,14 @@ def main(cfg: DictConfig) -> None:
                 for a in accuracy
             ],
             'Base Station Model': base_station.model,
-            'Case': 'Federated Semantic Alignment',
+            'Case': 'Multi-Link Semantic Alignment',
             'Latent Real Dim': base_station.dim,
             'Latent Complex Dim': (base_station.dim + 1) // 2,
             'Simulation': cfg.simulation,
         }
     ).write_parquet(
         RESULTS_PATH
-        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.simulation}.parquet'
+        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}.parquet'#_{cfg.simulation}.parquet'
     )
 
     wandb.finish()

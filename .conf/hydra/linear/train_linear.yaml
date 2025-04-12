@@ -4,7 +4,7 @@ defaults:
 seed: 42
 device: cpu
 iterations: 30
-simulation: example
+simulation: 'compr_fact'
 
 datamodule:
   dataset: cifar10
@@ -26,6 +26,7 @@ base_station:
   rho: 1
   px_cost: 1.0
   channel_aware: true
+  status: 'multi-link'
 
 agents:
   privacy: true
@@ -42,4 +43,4 @@ agents:
     - levit_128s.fb_dist_in1k
 
 wandb:
-  project: multi_agent_semantic_alignment__linear_model
+  project: multi_agent_semantic_alignment__linear_model_ex
