@@ -34,7 +34,7 @@ agents:
     - vit_small_patch16_224
     - vit_base_patch16_224
     - mobilenetv3_small_075
-    - levit_128s.fb_dist_in1k
+    - efficientvit_m5.r224_in1k
 
 wandb:
   project: multi_agent_semantic_alignment__linear_model
