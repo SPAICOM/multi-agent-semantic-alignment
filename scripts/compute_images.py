@@ -17,6 +17,7 @@ from pathlib import Path
 
 import seaborn as sns
 import matplotlib.pyplot as plt
+import matplotlib.lines as mlines
 
 
 # =============================================================
@@ -92,6 +93,7 @@ def main() -> None:
                     'Seed',
                     'SNR',
                     'Simulation',
+                    'Training Subset Ratio',
                 ]
             )
             .agg(
@@ -103,14 +105,18 @@ def main() -> None:
         .rename(
             {
                 'Antennas Transmitter': 'Channel',
+                'Training Subset Ratio': 'Semantic Pilots Percentage',
             }
         )
+        .sort('Semantic Pilots Percentage', descending=False)
         .with_columns(
             (
                 (pl.col('Channel')).cast(pl.String)
                 + 'x'
                 + (pl.col('Channel')).cast(pl.String)
             ).alias('Channel'),
+            (pl.col('Semantic Pilots Percentage') * 100).cast(pl.String)
+            + r' \%',
         )
     )
 
@@ -122,21 +128,65 @@ def main() -> None:
     # ===================================================================================
     filter = pl.col('Simulation') == 'compr_fact'
 
+    case_order = [
+        'Federated Semantic Alignment',
+        'Multi-Link Semantic Alignment',
+        'Baseline First-K',
+        'Baseline Top-K',
+    ]
+
     ax = sns.lineplot(
         df.filter(filter),
         x='Compression Factor',
         y='Accuracy',
         style='Channel',
         hue='Case',
+        hue_order=case_order,
         markers=True,
     )
-    sns.move_legend(
-        ax,
-        'upper center',
+    # Get all handles and labels
+    handles, labels = ax.get_legend_handles_labels()
+
+    # Separate by Case and Channel
+    case_labels = case_order
+    channel_labels = ['1x1', '2x2', '4x4']
+
+    # Match labels to handles
+    case_handles = [handles[labels.index(cl)] for cl in case_labels]
+    channel_handles = [handles[labels.index(cl)] for cl in channel_labels]
+
+    # First legend: Channel
+    legend1 = ax.legend(
+        channel_handles,
+        channel_labels,
+        title='Channel',
+        loc='center right',
+        bbox_to_anchor=(1, 0.6),
+        ncol=1,
+        frameon=True,
+        framealpha=1,
+    )
+
+    # Second legend: Case
+    ax.legend(
+        case_handles,
+        case_labels,
+        title='Case',
+        loc='upper center',
+        bbox_to_anchor=(0.5, 1.25),
         ncol=2,
         frameon=True,
-        bbox_to_anchor=(0.5, 1.3),
     )
+
+    # Add both legends manually
+    ax.add_artist(legend1)
+    # sns.move_legend(
+    #     ax,
+    #     'upper center',
+    #     ncol=2,
+    #     frameon=True,
+    #     bbox_to_anchor=(0.5, 1.3),
+    # )
     plt.xlabel(r'Compression Factor $\zeta$ (\%)')
     plt.xticks(ticks, labels=ticks)
     plt.savefig(
@@ -240,14 +290,14 @@ def main() -> None:
         plot_df,
         x='Compression Factor',
         y='Loss',
-        style='Case',
+        style='Semantic Pilots Percentage',
         hue='Case',
         markers=True,
     )
     sns.move_legend(
         ax,
         'upper center',
-        ncol=2,
+        ncol=3,
         frameon=True,
         bbox_to_anchor=(0.5, 1.2),
     )
@@ -270,14 +320,14 @@ def main() -> None:
         plot_df,
         x='Compression Factor',
         y='Accuracy',
-        style='Case',
+        style='Semantic Pilots Percentage',
         hue='Case',
         markers=True,
     )
     sns.move_legend(
         ax,
         'upper center',
-        ncol=2,
+        ncol=3,
         frameon=True,
         bbox_to_anchor=(0.5, 1.2),
     )
@@ -290,6 +340,188 @@ def main() -> None:
     )
     plt.savefig(
         str(IMG_PATH / 'AccuracyGroups.png'),
+        bbox_inches='tight',
+    )
+    plt.clf()
+    plt.cla()
+
+    # ===================================================================================
+    #                          Both MSE & Accuracy - Homogeneous Vs Heterogeneous
+    # ===================================================================================
+
+    # Create figure and main axis
+    fig, ax1 = plt.subplots()
+
+    # For Loss plots, we'll use solid lines
+    sns.lineplot(
+        data=plot_df,
+        x='Compression Factor',
+        y='Loss',
+        hue='Case',
+        style='Semantic Pilots Percentage',
+        markers=True,
+        dashes=False,  # Use solid lines for Loss
+        ax=ax1,
+        legend=False,  # Don't show the automatic legend
+    )
+
+    # Manually set all lines for Loss to be solid
+    for line in ax1.get_lines():
+        line.set_linestyle('-')  # Set all Loss lines to solid
+
+    ax1.set_ylabel('Network MSE', color='black')
+    ax1.tick_params(axis='y', labelcolor='black')
+
+    # Create secondary y-axis for Accuracy
+    ax2 = ax1.twinx()
+
+    # For Accuracy plots, we'll use dashed lines
+    sns.lineplot(
+        data=plot_df,
+        x='Compression Factor',
+        y='Accuracy',
+        hue='Case',
+        style='Semantic Pilots Percentage',
+        markers=True,
+        dashes=True,  # Use dashed lines for Accuracy
+        ax=ax2,
+        legend=False,  # Don't show the automatic legend
+    )
+
+    # Manually set all lines for Accuracy to be dashed
+    for line in ax2.get_lines():
+        line.set_linestyle('--')  # Set all Accuracy lines to dashed
+
+    ax2.set_ylabel('Accuracy', color='black')
+    ax2.tick_params(axis='y', labelcolor='black')
+    ax2.set_ylim(None, 0.9)  # Set the Accuracy y-axis range
+
+    # X-axis settings
+    ax1.set_xlabel(r'Compression Factor $\zeta$ (\%)')
+
+    # Get unique values for Case and Semantic Pilots Percentage
+    # case_values = plot_df['Case'].unique().sort(descending=False)
+    case_values = ['homogeneous', 'heterogeneous']
+    dataset_perc_values = plot_df['Semantic Pilots Percentage'].unique()
+
+    # Extract the actual colors used by seaborn for each case
+    color_palette = dict(
+        zip(case_values, sns.color_palette(n_colors=len(case_values)))
+    )
+
+    # Extract actual markers used by seaborn
+    all_lines = ax1.get_lines()
+    style_mapping = {}
+
+    # Create a dictionary to map Semantic Pilots Percentage to the marker used
+    for line in all_lines:
+        # Try to get the style attribute from the line's properties
+        if hasattr(line, '_style_kw'):
+            dataset_perc = line._style_kw.get('label', None)
+            if dataset_perc in dataset_perc_values:
+                style_mapping[dataset_perc] = {'marker': line.get_marker()}
+
+    # If we couldn't extract styles, use default ones
+    dataset_perc_values = sorted(
+        dataset_perc_values, key=lambda x: float(x.split(' ')[0])
+    )
+    if not style_mapping:
+        markers = ['o', 'X', 's']
+        style_mapping = {
+            dp: {'marker': markers[i % len(markers)]}
+            for i, dp in enumerate(dataset_perc_values)
+        }
+
+    # Create custom legend handles for Case (colors only)
+    case_handles = []
+    for case in case_values:
+        case_handles.append(
+            mlines.Line2D(
+                [],
+                [],
+                color=color_palette.get(case),
+                marker=None,
+                markersize=0,
+                linestyle='-',
+                label=case,
+            )
+        )
+
+    # Create custom legend handles for Semantic Pilots Percentage (markers only)
+    dataset_handles = []
+    for perc in dataset_perc_values:
+        style = style_mapping.get(perc, {'marker': 'o'})
+        dataset_handles.append(
+            mlines.Line2D(
+                [],
+                [],
+                color='black',  # Use neutral color
+                marker=style['marker'],
+                linestyle='',
+                label=perc,
+            )
+        )
+
+    # # Create custom legend handles for Loss vs Accuracy (line styles)
+    metric_handles = [
+        mlines.Line2D(
+            [],
+            [],
+            color='black',
+            marker=None,
+            linestyle='-',
+            label='Network MSE',
+        ),
+        mlines.Line2D(
+            [],
+            [],
+            color='black',
+            marker=None,
+            linestyle='--',
+            label='Accuracy',
+        ),
+    ]
+
+    # Add three separate legends
+    case_legend = ax1.legend(
+        handles=case_handles,
+        loc='upper center',
+        bbox_to_anchor=(0.22, 1.22),
+        ncol=len(case_values),
+        title='Case',
+    )
+
+    metric_legend = ax1.legend(
+        handles=metric_handles,
+        loc='center right',
+        ncol=1,
+        framealpha=1,
+        title='Metric',
+    )
+
+    ax1.legend(
+        handles=dataset_handles,
+        loc='upper center',
+        bbox_to_anchor=(0.8, 1.22),
+        ncol=len(dataset_perc_values),
+        columnspacing=0.5,
+        title='Semantic Pilots Percentage',
+    )
+
+    # Add all legends back (this is a trick to show multiple legends)
+    ax1.add_artist(case_legend)
+    ax1.add_artist(metric_legend)
+
+    # Show and/or save
+    plt.tight_layout()
+    plt.xticks(ticks, labels=ticks)
+    plt.savefig(
+        str(IMG_PATH / 'MSE&Accuracy_struggle.pdf'),
+        format='pdf',
+        bbox_inches='tight',
+    )
+    plt.savefig(
+        str(IMG_PATH / 'MSE&Accuracy_struggle.png'),
         bbox_inches='tight',
     )
     plt.clf()

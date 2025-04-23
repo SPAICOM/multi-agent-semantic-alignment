@@ -831,15 +831,23 @@ class BaseStationBaseline(BaseStation):
                 lmb : float
                     The updated lmb.
             """
+            # Constraint calculated without the intervation of lambda
             cnst_viol = self.get_trace() - self.px_cost
 
+            # Check constraint violation
             if cnst_viol > 0:
+                # If constraint is violeted, then update lambda
                 lmb += self.lr * cnst_viol
+
+                # Make sure lambda is positive
                 lmb = max(0, lmb)
+
             else:
+                # If constraint is satisfied, then lambda is set to zero
                 lmb = 0
             return lmb
 
+        # Calculate the global F as the average of the local Fs
         self.F = torch.stack(list(self.F_agent.values()), dim=0).mean(dim=0)
 
         # Check if the constraint is respected
@@ -853,6 +861,7 @@ class BaseStationBaseline(BaseStation):
                 for agent_id in self.F_agent:
                     self.__F_local_step(agent_id)
 
+                # Calculate the global F as the average of the local Fs
                 self.F = torch.stack(list(self.F_agent.values()), dim=0).mean(
                     dim=0
                 )
@@ -860,6 +869,7 @@ class BaseStationBaseline(BaseStation):
             # Constraint respected, set lambda to zero
             self.lmb = 0
 
+        # Calculating the normalizer needed to impose trace of FF^H to 1
         self.normalizer = math.sqrt(self.get_trace())
         self.F = self.F / self.normalizer
         return None
