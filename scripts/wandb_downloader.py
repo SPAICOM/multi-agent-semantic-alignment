@@ -51,6 +51,7 @@ def find_and_rename_ckpt_files(
 
 def download_classifier(
     org: str,
+    project: str,
     rx_enc: str,
     dataset: str,
     seed: int,
@@ -60,6 +61,8 @@ def download_classifier(
     Args:
         org : str
             The name of the wandb organization.
+        project : str
+            The project name.
         rx_enc : str
             The receiver encoder name.
         dataset : str
@@ -73,7 +76,7 @@ def download_classifier(
         None
     """
     session.use_artifact(
-        f'{org}/multi_agent_semantic_alignment__classifier/model-{rx_enc}_{seed}_{dataset}:best',
+        f'{org}/{project}/model-{rx_enc}_{seed}_{dataset}:best',
         type='model',
     ).download()
     find_and_rename_ckpt_files(
@@ -118,6 +121,7 @@ def main() -> None:
     run = wandb.init()
 
     # Define needed variables
+    project = 'multi-agent-semantic-alignment__classifier'
     datasets = ['cifar10']
     seeds = [27, 42, 100, 123, 144, 200]
     rx_encs = [
@@ -142,6 +146,7 @@ def main() -> None:
             for seed in seeds:
                 download_classifier(
                     org=args.org,
+                    project=project,
                     rx_enc=rx_enc,
                     dataset=dataset,
                     seed=seed,
