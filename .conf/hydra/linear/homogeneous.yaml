@@ -26,6 +26,7 @@ base_station:
   rho: 1
   px_cost: 1.0
   channel_aware: true
+  status: shared
 
 agents:
   privacy: true

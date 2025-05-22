@@ -10,8 +10,8 @@ This section provides the necessary commands to run the simulations required for
 ### Accuracy Vs Compression Factor
 
 ```bash
-# Federated Semantic Alignment
-python scripts/train_linear.py communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 simulation=compr_fact -m
+# Federated Semantic Alignment and Multi-Link Semantic Alignment
+python scripts/train_linear.py communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 base_station.status=multi-link,shared simulation=compr_fact -m
 
 # Baseline First-K
 python scripts/train_baseline.py communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 base_station.strategy=First-K simulation=compr_fact -m

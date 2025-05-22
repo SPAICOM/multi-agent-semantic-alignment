@@ -24,6 +24,7 @@ else:
         a_inv_times_b,
     )
 
+
 # ============================================================
 #
 #                    CLASSES DEFINITION
@@ -50,7 +51,7 @@ class BaseStation:
         device : str
             The device on which we run the simulation. Default "cpu".
         status : str
-            The stream status of BS: [multi-link] or [shared]. Default "shared".
+            The stream status of BS,  "multi-link" or "shared". Default "shared".
 
     Attributes:
         self.<param_name> :
@@ -97,6 +98,8 @@ class BaseStation:
         self.device: str = device
         self.status: str = status
 
+        assert self.status in {'multi-link', 'shared'}, 'The passed status is not one of the available.'
+
         # Attributes Initialization
         self.L: dict[int, torch.Tensor] = {}
         self.mean: dict[int, float] = {}
@@ -113,8 +116,8 @@ class BaseStation:
             ),
             dtype=torch.complex64,
         ).to(self.device)
-
         self.F_agent = {}
+        
         # ADMM variables
         if self.status=='shared':
             self.Z = torch.zeros_like(self.F)
@@ -178,8 +181,9 @@ class BaseStation:
 
         # Connect the agent to the base station
         self.agents_id.add(idx)
-        #populate the initialization of F_agent, Z_agent and U_agent
-        if self.status=='multi-link':
+
+        # Populate the initialization of F_agent, Z_agent and U_agent
+        if self.status == 'multi-link':
             self.F_agent[idx] = self.F.clone()
             self.Z[idx] = torch.zeros_like(self.F)
             self.U[idx] = torch.zeros_like(self.F)
@@ -323,14 +327,19 @@ class BaseStation:
         idx, msg1, msg2 = msg.values()
         msg1 = msg1.to(self.device)
         msg2 = msg2.to(self.device)
+
         # Variables
         _, n = self.agents_pilots[idx].shape
         rho = self.rho * n
         B = torch.linalg.inv(
             self.agents_pilots[idx] @ self.agents_pilots[idx].H
         )
-        C = (rho * (self.Z[idx] - self.U[idx]) + msg2 @ self.agents_pilots[idx].H) @ B
 
+        if self.status == 'multi-link':
+            C = (rho * (self.Z[idx] - self.U[idx]) + msg2 @ self.agents_pilots[idx].H) @ B
+        else:
+            C = (rho * (self.Z - self.U) + msg2 @ self.agents_pilots[idx].H) @ B
+            
         self.F_agent[idx] = torch.tensor(
             solve_sylvester(
                 msg1.cpu().numpy(), (rho * B).cpu().numpy(), C.cpu().numpy()
@@ -371,29 +380,31 @@ class BaseStation:
         Returns:
             None
         """
-        if self.status == 'multi-link':
-           #Z step for multi-link mode: dictionary-based Z[idx].
-            for idx in self.agents_id:
-                C = self.F_agent[idx] + self.U[idx]
+        match self.status:
+            case 'multi-link':
+               #Z step for multi-link mode: dictionary-based Z[idx].
+                for idx in self.agents_id:
+                    C = self.F_agent[idx] + self.U[idx]
+                    tr = torch.trace(C @ C.H).real
+
+                    if tr <= self.px_cost:
+                        self.Z[idx] = C
+                    else:
+                        lambd = torch.sqrt(tr / self.px_cost).item() - 1.0
+                        self.Z[idx] = C / (1.0 + lambd)
+
+            case 'shared':
+                C = self.F + self.U
                 tr = torch.trace(C @ C.H).real
+
                 if tr <= self.px_cost:
-                    self.Z[idx] = C
+                    self.Z = C
                 else:
-                    lambd = torch.sqrt(tr / self.px_cost).item() - 1.0
-                    self.Z[idx] = C / (1.0 + lambd)
+                    lmb = torch.sqrt(tr / self.px_cost).item() - 1
+                    self.Z = C / (1 + lmb)
 
-        elif self.status == 'shared':
-            C = self.F + self.U
-            tr = torch.trace(C @ C.H).real
-
-            if tr <= self.px_cost:
-                self.Z = C
-            else:
-                lmb = torch.sqrt(tr / self.px_cost).item() - 1
-                self.Z = C / (1 + lmb)
-
-        else:
-            print("Status of Base Station is not recognized;")
+            case _:
+                raise Exception('The passed status is not available.')
 
         return None
 
@@ -406,14 +417,17 @@ class BaseStation:
         Returns:
             None
         """
-        if self.status == 'multi-link':
-          for idx in self.agents_id:
-            self.U[idx] += self.F_agent[idx] - self.Z[idx]
+        match self.status:
+            case 'multi-link':
+              for idx in self.agents_id:
+                self.U[idx] += self.F_agent[idx] - self.Z[idx]
 
-        elif self.status == 'shared':
-            self.U += self.F - self.Z
-        else:
-            print("Status of Base Station is not recognized;")
+            case 'shared':
+                self.U += self.F - self.Z
+
+            case _:
+                raise Exception('The passed status is not available.')
+
         return None
 
     def is_channel_aware(
@@ -456,6 +470,7 @@ class BaseStation:
         """
         if self.status == 'shared':
             self.__F_global_step()
+
         self.__Z_step()
         self.__U_step()
         return None
@@ -1309,6 +1324,7 @@ class AgentBaseline(Agent):
 
         return msg.T
 
+
 # ============================================================
 #
 #                         MAIN LOOP
@@ -1323,7 +1339,6 @@ def main() -> None:
 
     # Variables definition
     n: int = 100
-    lmb: float = 1e-1
     lr: float = 1e-1
     rho: float = 1e-1
     snr: float = 20.0
@@ -1336,6 +1351,7 @@ def main() -> None:
     channel_aware: bool = True
     antennas_transmitter: int = 4
     antennas_receiver: int = 4
+    status: str = 'multi-link'
     channel_matrix: torch.Tensor = complex_gaussian_matrix(
         mean=0, std=1, size=(antennas_receiver, antennas_transmitter)
     )
@@ -1370,6 +1386,7 @@ def main() -> None:
         channel_usage=channel_usage,
         rho=rho,
         px_cost=px_cost,
+        status=status,
         device=device,
     )
 
@@ -1422,7 +1439,6 @@ def main() -> None:
         dim=tx_dim,
         antennas_transmitter=antennas_transmitter,
         channel_usage=channel_usage,
-        lmb=lmb,
         lr=lr,
         px_cost=px_cost,
         strategy=strategy,
@@ -1454,6 +1470,7 @@ def main() -> None:
     print('[Passed]')
 
     return None
+
 
 if __name__ == '__main__':
     main()

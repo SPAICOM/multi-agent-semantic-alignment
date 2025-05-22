@@ -79,7 +79,7 @@ def main(cfg: DictConfig) -> None:
     # Define some usefull paths
     CURRENT: Path = Path('.')
     MODEL_PATH: Path = CURRENT / 'models'
-    RESULTS_PATH: Path = CURRENT / 'multi-link'
+    RESULTS_PATH: Path = CURRENT / 'linear_model'
 
     # Create results directory
     RESULTS_PATH.mkdir(exist_ok=True, parents=True)
@@ -103,10 +103,19 @@ def main(cfg: DictConfig) -> None:
     # Initialize W&B and log config
     wandb.init(
         project=cfg.wandb.project,
-        name=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
-        id=f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
+        name=f'{cfg.seed}_{cfg.base_station.status}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
+        id=f'{cfg.seed}_{cfg.base_station.status}_{cfg.communication.channel_usage}_{cfg.communication.antennas_receiver}_{cfg.communication.antennas_transmitter}_{cfg.communication.snr}',
         config=wandb_config,
     )
+
+    # Set the case:
+    match cfg.base_station.status:
+        case 'multi-link':
+            case = 'Multi-Link Semantic Alignment'
+        case 'shared':
+            case = 'Federated Semantic Alignment'
+        case _:
+            raise Exception('The passed status is not supported.')
 
     # Setting the seed
     seed_everything(cfg.seed, workers=True)
@@ -220,7 +229,7 @@ def main(cfg: DictConfig) -> None:
             )
             base_station.received_from_agent(msg=a_msg)
 
-        # Base Station computes global F, Z, and U stepsb based on its communication status(shared or multi-link)
+        # Base Station computes global F, Z, and U
         base_station.step()
 
         # ===========================================================================
@@ -426,14 +435,14 @@ def main(cfg: DictConfig) -> None:
                 for a in accuracy
             ],
             'Base Station Model': base_station.model,
-            'Case': 'Multi-Link Semantic Alignment',
+            'Case': case,
             'Latent Real Dim': base_station.dim,
             'Latent Complex Dim': (base_station.dim + 1) // 2,
             'Simulation': cfg.simulation,
         }
     ).write_parquet(
         RESULTS_PATH
-        / f'{cfg.seed}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}.parquet'#_{cfg.simulation}.parquet'
+        / f'{cfg.seed}_{cfg.base_station.status}_{cfg.communication.channel_usage}_{cfg.communication.antennas_transmitter}_{cfg.communication.antennas_receiver}_{cfg.communication.snr}_{cfg.simulation}.parquet'
     )
 
     wandb.finish()
