@@ -21,7 +21,7 @@ python scripts/train_baseline.py communication.channel_usage=1,2,3,4,5,10 commun
 ```
 
 ```bash
-# Federated Semantic Alignment
+# Federated Semantic Alignment and Multi-Link Semantic Alignment
 uv run scripts/train_linear.py communication.channel_usage=1,2,4,6,8,10,20 communication.antennas_receiver=1,2,4 communication.antennas_transmitter=1,2,4 seed=27,42,100,123,144,200 simulation=compr_fact -m
 
 # Baseline First-K
