@@ -6,22 +6,24 @@ from scipy.linalg import solve_sylvester
 
 if __name__ == '__main__':
     from utils import (
+        awgn,
+        prewhiten,
+        a_inv_times_b,
+        sigma_given_snr,
+        mmse_svd_equalizer,
+        complex_gaussian_matrix,
         complex_compressed_tensor,
         decompress_complex_tensor,
-        complex_gaussian_matrix,
-        prewhiten,
-        awgn,
-        sigma_given_snr,
-        a_inv_times_b,
     )
 else:
     from src.utils import (
+        awgn,
+        prewhiten,
+        a_inv_times_b,
+        sigma_given_snr,
+        mmse_svd_equalizer,
         complex_compressed_tensor,
         decompress_complex_tensor,
-        prewhiten,
-        awgn,
-        sigma_given_snr,
-        a_inv_times_b,
     )
 
 
@@ -1221,23 +1223,8 @@ class AgentBaseline(Agent):
         Returns:
             None
         """
-        U, S, Vt = torch.linalg.svd(self.channel_matrix)
-
-        U = U.to(self.device)
-        S = S.to(self.device)
-        Vt = Vt.to(self.device)
-
-        S = torch.diag(S).to(torch.complex64)
-        B = U @ S
-
-        if self.snr:
-            self.G = (
-                B.H
-                @ torch.linalg.inv(B @ B.H + (1 / self.snr) * (1 + 1j))
-                * torch.linalg.norm(Vt.H)
-            )
-        else:
-            self.G = torch.linalg.inv(S) @ U.H * torch.linalg.norm(Vt.H)
+        G, F = mmse_svd_equalizer(self.channel_matrix, self.snr)
+        self.G = G.to(self.device)
         return None
 
     def __alignment_step(
