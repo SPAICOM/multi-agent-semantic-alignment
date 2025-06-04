@@ -367,6 +367,9 @@ def mmse_svd_equalizer(
     # SVD: H = U @ diag(s) @ Vh
     U, s, Vh = torch.linalg.svd(channel_matrix)
 
+    # Get antennas
+    antennas_receiver, _ = channel_matrix.shape
+
     # Form diagonal Sigma and cast to complex dtype
     Sigma = torch.diag(s).to(channel_matrix.dtype)
 
@@ -375,7 +378,9 @@ def mmse_svd_equalizer(
 
     if snr_db is not None:
         snr_linear = 10 ** (snr_db / 10)
-        reg = 1.0 / snr_linear
+        reg = (1.0 / snr_linear) * torch.eye(
+            antennas_receiver, dtype=channel_matrix.dtype
+        )
 
         # MMSE receiver
         inv_term = torch.inverse(Sigma.H @ Sigma + reg)
