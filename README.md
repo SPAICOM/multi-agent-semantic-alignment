@@ -148,9 +148,9 @@ You're ready to go! 🚀
 ## Authors
 
 - [Giuseppe Di Poce](https://github.com/giuseppedipoce)
-- [Mario Edoardo Pandolfo](https://github.com/JRhin)
-- [Paolo Di Lorenzo](https://scholar.google.com/citations?hl=en&user=VZYvspQAAAAJ)
+- [Mario Edoardo Pandolfo](https://scholar.google.com/citations?user=wAeScL8AAAAJ&hl)
 - [Emilio Calvanese Strinati](https://scholar.google.com/citations?user=bWndGhQAAAAJ)
+- [Paolo Di Lorenzo](https://scholar.google.com/citations?hl=en&user=VZYvspQAAAAJ)
 
 ## Used Technologies
 
