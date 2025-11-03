@@ -159,7 +159,8 @@ If you find this code useful for your research, please consider citing the follo
   number={},
   pages={1-5},
   keywords={Training;Wireless communication;Accuracy;Protocols;Equalizers;Noise;Key performance indicator;Semantic communication;Numerical models;Optimization;Semantic Communication;semantic equalization;latent space alignment;MIMO;Federated Learning},
-  doi={10.1109/SPAWC66079.2025.11143294}}
+  doi={10.1109/SPAWC66079.2025.11143294}
+}
 ```
 
 ## Authors
