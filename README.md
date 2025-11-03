@@ -149,7 +149,7 @@ You're ready to go! 🚀
 
 If you find this code useful for your research, please consider citing the following paper:
 
-```bash
+```
 @INPROCEEDINGS{dipoce2025fedsemalign,
   author={Di Poce, Giuseppe and Pandolfo, Mario Edoardo and Strinati, Emilio Calvanese and Di Lorenzo, Paolo},
   booktitle={2025 IEEE 26th International Workshop on Signal Processing and Artificial Intelligence for Wireless Communications (SPAWC)}, 
