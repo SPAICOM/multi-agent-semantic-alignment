@@ -3,6 +3,7 @@
 <h5 align="center">
     
 [![ieee](https://img.shields.io/static/v1?label=IEEE+Paper&message=11143294&color=0057b7&logo=ieee)](https://ieeexplore.ieee.org/document/11143294)
+[![arXiv](https://img.shields.io/badge/Arxiv-2602.17271-b31b1b.svg?logo=arXiv)](https://arxiv.org/abs/2602.17271)
 [![License](https://img.shields.io/badge/Code%20License-MIT-yellow)](https://github.com/SPAICOM/multi-agent-semantic-alignment/blob/main/LICENSE)
 
  <br>
